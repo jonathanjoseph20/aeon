@@ -206,7 +206,17 @@ chains:
 # Default model for all skills. Override per-run via workflow_dispatch.
 # Options: claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5-20251001
 # Bankr gateway also supports: gemini-3-pro, gemini-3-flash, gpt-5.2, kimi-k2.5, qwen3-coder
-model: claude-opus-4-7
+model: claude-haiku-4-5-20251001
+
+skills:
+  deep-research:
+    model: claude-sonnet-4-6
+
+  coding:
+    model: claude-sonnet-4-6
+
+  pr-review:
+    model: claude-sonnet-4-6
 
 # AI Gateway — route Claude Code requests through an LLM gateway.
 # provider: direct (default, uses ANTHROPIC_API_KEY) | bankr (uses BANKR_LLM_KEY)
@@ -222,4 +232,10 @@ channels:
 # Messaging integration
 # Polls for messages every 5 minutes on Telegram/Discord/Slack.
 telegram:
+  enabled: false
+
+slack:
   enabled: true
+  slack_webhook_url: ${SLACK_WEBHOOK_URL}
+  slack_bot_token: ${SLACK_BOT_TOKEN}
+  channel_id: "C0AFXGHQ91N"
