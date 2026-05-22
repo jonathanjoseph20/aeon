@@ -11,13 +11,13 @@
   },
   "heartbeat": {
     "last_dispatch": "2026-05-22T16:32:13Z",
-    "last_status": "dispatched",
-    "last_failed": "2026-05-22T16:28:05Z",
-    "total_runs": 14,
+    "last_status": "failed",
+    "last_failed": "2026-05-22T16:32:35Z",
+    "total_runs": 15,
     "total_successes": 0,
-    "total_failures": 14,
-    "consecutive_failures": 14,
+    "total_failures": 15,
+    "consecutive_failures": 15,
     "success_rate": 0,
-    "last_error": "_input_tokens\":3182,\"cache_creation\":{\"ephemeral_5m_input_tokens\":3182,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}],\"speed\":\"standard\"},\"modelUsage\":{\"claude-haiku-4-5-20251001\":{\"inputTokens\":48"
+    "last_error": "n_input_tokens\":3520,\"cache_creation\":{\"ephemeral_5m_input_tokens\":3520,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}],\"speed\":\"standard\"},\"modelUsage\":{\"claude-haiku-4-5-20251001\":{\"inputTokens\":4"
   }
 }
