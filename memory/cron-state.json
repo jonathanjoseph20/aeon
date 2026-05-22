@@ -13,12 +13,12 @@
     "last_dispatch": "2026-05-22T16:32:13Z",
     "last_status": "success",
     "last_failed": "2026-05-22T16:46:02Z",
-    "total_runs": 18,
-    "total_successes": 1,
+    "total_runs": 19,
+    "total_successes": 2,
     "total_failures": 17,
     "consecutive_failures": 0,
-    "success_rate": 0.06,
+    "success_rate": 0.11,
     "last_error": "_input_tokens\":8108,\"cache_creation\":{\"ephemeral_5m_input_tokens\":8108,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}],\"speed\":\"standard\"},\"modelUsage\":{\"claude-haiku-4-5-20251001\":{\"inputTokens\":48",
-    "last_success": "2026-05-22T20:34:01Z"
+    "last_success": "2026-05-22T20:57:25Z"
   }
 }
