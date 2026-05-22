@@ -12,12 +12,12 @@
   "heartbeat": {
     "last_dispatch": "2026-05-22T16:32:13Z",
     "last_status": "failed",
-    "last_failed": "2026-05-22T16:32:35Z",
-    "total_runs": 15,
+    "last_failed": "2026-05-22T16:35:51Z",
+    "total_runs": 16,
     "total_successes": 0,
-    "total_failures": 15,
-    "consecutive_failures": 15,
+    "total_failures": 16,
+    "consecutive_failures": 16,
     "success_rate": 0,
-    "last_error": "n_input_tokens\":3520,\"cache_creation\":{\"ephemeral_5m_input_tokens\":3520,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}],\"speed\":\"standard\"},\"modelUsage\":{\"claude-haiku-4-5-20251001\":{\"inputTokens\":4"
+    "last_error": "_input_tokens\":8320,\"cache_creation\":{\"ephemeral_5m_input_tokens\":8320,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}],\"speed\":\"standard\"},\"modelUsage\":{\"claude-haiku-4-5-20251001\":{\"inputTokens\":48"
   }
 }
