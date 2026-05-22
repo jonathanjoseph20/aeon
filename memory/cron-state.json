@@ -10,8 +10,8 @@
     "last_error": "_input_tokens\":3159,\"cache_creation\":{\"ephemeral_5m_input_tokens\":3159,\"ephemeral_1h_input_tokens\":0},\"type\":\"message\"}],\"speed\":\"standard\"},\"modelUsage\":{\"claude-haiku-4-5-20251001\":{\"inputTokens\":48"
   },
   "heartbeat": {
-    "last_dispatch": "2026-05-22T13:58:46Z",
-    "last_status": "failed",
+    "last_dispatch": "2026-05-22T16:32:13Z",
+    "last_status": "dispatched",
     "last_failed": "2026-05-22T16:28:05Z",
     "total_runs": 14,
     "total_successes": 0,
