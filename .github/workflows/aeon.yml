@@ -527,6 +527,12 @@ jobs:
         run: |
           SKILL="${{ steps.skill.outputs.name }}"
 
+          # Cost control: disable LLM-based output analysis unless explicitly enabled.
+          if [ "${ANALYZE_OUTPUT:-false}" != "true" ]; then
+            echo "Skipping LLM output analysis (ANALYZE_OUTPUT not true)"
+            exit 0
+          fi
+
           # Skip analysis for meta skills (they don't produce scorable output)
           case "$SKILL" in heartbeat|skill-health|skill-analytics|reflect|memory-flush|self-review|cost-report) echo "Skipping analysis for meta skill"; exit 0;; esac
 
