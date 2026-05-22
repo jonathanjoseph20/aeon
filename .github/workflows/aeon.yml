@@ -398,26 +398,43 @@ jobs:
           SKILL_NAME="${{ steps.skill.outputs.name }}"
           VAR="$SKILL_VAR"
 
-          # Build prompt — inject chain context if running as part of a chain
+          # Build prompt — inject chain context if running as part of a chain.
+          # Run Claude from a tiny temp directory so Claude Code does not preload the full repo.
+          ORIG_DIR="$PWD"
+          RUN_DIR="$(mktemp -d)"
+          mkdir -p "$RUN_DIR/skills/${SKILL_NAME}"
+
+          if [ -f "$ORIG_DIR/skills/${SKILL_NAME}/SKILL.md" ]; then
+            cp "$ORIG_DIR/skills/${SKILL_NAME}/SKILL.md" "$RUN_DIR/skills/${SKILL_NAME}/SKILL.md"
+          else
+            echo "::error::Missing skill file: skills/${SKILL_NAME}/SKILL.md"
+            exit 1
+          fi
+
           CHAIN_CTX="${{ inputs.chain_context_file }}"
-          if [ -n "$CHAIN_CTX" ] && [ -f "$CHAIN_CTX" ]; then
-            CONTEXT=$(cat "$CHAIN_CTX")
+          if [ -n "$CHAIN_CTX" ] && [ -f "$ORIG_DIR/$CHAIN_CTX" ]; then
+            cp "$ORIG_DIR/$CHAIN_CTX" "$RUN_DIR/chain-context.md"
+            CONTEXT=$(cat "$RUN_DIR/chain-context.md")
             PROMPT="Today is $TODAY.
 
           ## Context from prior chain steps
           $CONTEXT
 
-          Read and execute the skill defined in skills/${SKILL_NAME}/SKILL.md
+          Read and execute the skill defined in skills/${SKILL_NAME}/SKILL.md.
           Use the chain context above instead of re-running those skills. Synthesize and build on their outputs."
           else
-            PROMPT="Today is $TODAY. Read and execute the skill defined in skills/${SKILL_NAME}/SKILL.md"
+            PROMPT="Today is $TODAY. Read and execute the skill defined in skills/${SKILL_NAME}/SKILL.md."
           fi
+
           if [ -n "$VAR" ]; then
             PROMPT="$PROMPT
 
           Use this variable (override the default in the skill file):
           var=$VAR"
           fi
+
+          cd "$RUN_DIR"
+
           if ! CLAUDE_OUTPUT=$(echo "$PROMPT" | claude -p - \
             --model "$MODEL" --allowedTools "$ALLOWED" \
             --output-format json 2>&1); then
