@@ -398,6 +398,14 @@ jobs:
           SKILL_NAME="${{ steps.skill.outputs.name }}"
           VAR="$SKILL_VAR"
 
+           # Lightweight heartbeat fast-path (no Claude call)
+          if [ "$SKILL_NAME" = "heartbeat" ]; then
+            mkdir -p .pending-notify
+            echo "Aeon heartbeat OK — $(date -u +%FT%TZ)" > .pending-notify/heartbeat.md
+            echo "Heartbeat notification queued"
+            exit 0
+          fi
+
           # Build prompt — inject chain context if running as part of a chain.
           # Run Claude from a tiny temp directory so Claude Code does not preload the full repo.
           ORIG_DIR="$PWD"
