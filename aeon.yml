@@ -161,7 +161,7 @@ skills:
   onboard: { enabled: false, schedule: "workflow_dispatch", var: "" } # one-shot setup validator — checks secrets/workflows/memory writability and notifies a checklist with fix commands; pair with ./onboard CLI
 
   # --- Fallback (must be last) ---
-  heartbeat: { enabled: true, schedule: "0 8,14,20 * * *" }
+  heartbeat: { enabled: false, schedule: "0 8,14,20 * * *" }
 
 # Reactive triggers — event-driven skill dispatch based on cron-state.json conditions.
 # Skills with schedule: "reactive" are never cron-matched. Instead, the scheduler
