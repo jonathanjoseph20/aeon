@@ -538,11 +538,41 @@ jobs:
                  [ -z "$BOT_ID" ] && \
                  [ -z "$HAS_CHECK" ] && \
                  [[ "$TEXT" == "!aeon "* ]]; then
+
+                LOWER_TEXT=$(echo "$TEXT" | tr '[:upper:]' '[:lower:]')
+                REPLY=""
+
+                if [ "$LOWER_TEXT" = "!aeon ping" ]; then
+                  REPLY="pong"
+                elif [ "$LOWER_TEXT" = "!aeon help" ]; then
+                  REPLY="Available commands: !aeon ping, !aeon help. Longer requests will use Claude."
+                elif [[ "$LOWER_TEXT" == "!aeon say hello"* ]]; then
+                  REPLY="Hello there how are you"
+                fi
+
+                if [ -n "$REPLY" ]; then
+                  curl -s -X POST -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+                    -H "Content-Type: application/json" \
+                    -d "$(jq -n --arg ch "$SLACK_CHANNEL_ID" --arg text "$REPLY" \
+                      '{channel: $ch, text: $text}')" \
+                    "https://slack.com/api/chat.postMessage" > /dev/null
+
+                  curl -s -X POST -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+                    -H "Content-Type: application/json" \
+                    -d "$(jq -n --arg ch "$SLACK_CHANNEL_ID" --arg ts "$TS" \
+                      '{channel: $ch, timestamp: $ts, name: "white_check_mark"}')" \
+                    "https://slack.com/api/reactions.add" > /dev/null
+
+                  echo "Slack fast-path: $TEXT"
+                  continue
+                fi
+
                 curl -s -X POST -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
                   -H "Content-Type: application/json" \
                   -d "$(jq -n --arg ch "$SLACK_CHANNEL_ID" --arg ts "$TS" \
                     '{channel: $ch, timestamp: $ts, name: "white_check_mark"}')" \
                   "https://slack.com/api/reactions.add" > /dev/null
+
                 MESSAGES=$(echo "$MESSAGES" | jq --arg src "slack" --arg txt "$TEXT" '. + [{source: $src, text: $txt}]')
                 echo "Slack: $TEXT"
               fi
