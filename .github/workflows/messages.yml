@@ -573,7 +573,11 @@ jobs:
                     '{channel: $ch, timestamp: $ts, name: "white_check_mark"}')" \
                   "https://slack.com/api/reactions.add" > /dev/null
 
-                MESSAGES=$(echo "$MESSAGES" | jq --arg src "slack" --arg txt "$TEXT" '. + [{source: $src, text: $txt}]')
+                if [[ "$TEXT" == "!aeon claude "* ]]; then
+                  MESSAGES=$(echo "$MESSAGES" | jq --arg src "slack" --arg txt "$TEXT" '. + [{source: $src, text: $txt}]')
+                else
+                  echo "Skipping expensive dispatch for: $TEXT"
+                fi
                 echo "Slack: $TEXT"
               fi
             done
@@ -708,12 +712,13 @@ jobs:
           MESSAGE="$_MSG_MESSAGE"
           # Cost control: only invoke Claude for explicit Aeon commands.
           # Example Slack message: !aeon summarize today's repo changes
-          case "$MESSAGE" in
-            "!aeon "*)
-              MESSAGE="${MESSAGE#!aeon }"
+                    case "$MESSAGE" in
+            "!aeon claude "*)
+              MESSAGE="${MESSAGE#!aeon claude }"
               ;;
             *)
-              echo "Ignoring non-command message from $SOURCE"
+              ./notify "I only use Claude for explicit heavy tasks now. Try: !aeon ping, !aeon help, or !aeon claude <task>"
+              echo "Ignoring non-Claude command from $SOURCE"
               echo "SKILL_INPUT_TOKENS=0" >> "$GITHUB_OUTPUT"
               echo "SKILL_OUTPUT_TOKENS=0" >> "$GITHUB_OUTPUT"
               echo "SKILL_CACHE_READ_TOKENS=0" >> "$GITHUB_OUTPUT"
