@@ -673,6 +673,22 @@ jobs:
 
           SOURCE="$_MSG_SOURCE"
           MESSAGE="$_MSG_MESSAGE"
+          # Cost control: only invoke Claude for explicit Aeon commands.
+          # Example Slack message: !aeon summarize today's repo changes
+          case "$MESSAGE" in
+            "!aeon "*)
+              MESSAGE="${MESSAGE#!aeon }"
+              ;;
+            *)
+              echo "Ignoring non-command message from $SOURCE"
+              echo "SKILL_INPUT_TOKENS=0" >> "$GITHUB_OUTPUT"
+              echo "SKILL_OUTPUT_TOKENS=0" >> "$GITHUB_OUTPUT"
+              echo "SKILL_CACHE_READ_TOKENS=0" >> "$GITHUB_OUTPUT"
+              echo "SKILL_CACHE_CREATION_TOKENS=0" >> "$GITHUB_OUTPUT"
+              echo "SKILL_TOTAL_TOKENS=0" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
           PROMPT="Today is $TODAY. You received this message from the user on ${SOURCE}:
 
           \"$MESSAGE\"
