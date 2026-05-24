@@ -136,11 +136,14 @@ jobs:
           MESSAGE="$_MSG_MESSAGE"
 
           case "$MESSAGE" in
-            "!aeon claude "*)
-              MESSAGE="${MESSAGE#!aeon claude }"
-              ;;
+           "!aeon ask "*)
+            MESSAGE="${MESSAGE#!aeon ask }"
+            ;;
+          "!aeon claude "*)
+          MESSAGE="${MESSAGE#!aeon claude }"
+          ;;
             *)
-              ./notify "I only use Claude for explicit heavy tasks now. Try: !aeon ping, !aeon help, or !aeon claude <task>"
+              ./notify "I only use Claude for explicit heavy tasks now. Try: !aeon ping, !aeon help, or !aeon ask <question>"
               echo "Ignoring non-Claude command from $SOURCE"
               echo "SKILL_INPUT_TOKENS=0" >> "$GITHUB_OUTPUT"
               echo "SKILL_OUTPUT_TOKENS=0" >> "$GITHUB_OUTPUT"
