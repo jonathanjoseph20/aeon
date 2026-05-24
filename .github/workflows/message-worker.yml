@@ -193,6 +193,38 @@ jobs:
 
           echo "::notice::Token usage — input: $INPUT_TOKENS, output: $OUTPUT_TOKENS, cache_read: $CACHE_READ, cache_creation: $CACHE_CREATION, total: $TOTAL_TOKENS"
 
+          TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          mkdir -p memory
+
+          jq -n \
+            --arg timestamp "$TIMESTAMP" \
+            --arg source "slack" \
+            --arg command "ask" \
+            --arg workflow "message-worker.yml" \
+            --arg model "$CHAT_MODEL" \
+            --arg run_id "${{ github.run_id }}" \
+            --arg status "completed" \
+            --argjson input_tokens "$INPUT_TOKENS" \
+            --argjson output_tokens "$OUTPUT_TOKENS" \
+            --argjson cache_read "$CACHE_READ" \
+            --argjson cache_creation "$CACHE_CREATION" \
+            --argjson total_tokens "$TOTAL_TOKENS" \
+            '{
+              timestamp: $timestamp,
+              source: $source,
+              command: $command,
+              workflow: $workflow,
+              model: $model,
+              github_run_id: $run_id,
+              status: $status,
+              input_tokens: $input_tokens,
+              output_tokens: $output_tokens,
+              cache_read: $cache_read,
+              cache_creation: $cache_creation,
+              total_tokens: $total_tokens
+            }' >> memory/token-usage.jsonl
+
       - name: Log token usage
         if: steps.msg.outputs.source != ''
         env:
@@ -272,3 +304,11 @@ jobs:
           done
           echo "Failed to push after 5 attempts"
           exit 1
+
+      - name: Upload token usage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: token-usage
+          path: memory/token-usage.jsonl
+          if-no-files-found: ignore
