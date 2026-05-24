@@ -49,3 +49,6 @@ node_modules/
 # Stale artifacts
 .external-work
 .vuln-scan/
+
+memory/token-usage.jsonl
+memory/executions.jsonl
