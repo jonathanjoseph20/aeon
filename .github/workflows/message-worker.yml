@@ -154,7 +154,17 @@ jobs:
               ;;
           esac
 
-          CHAT_MODEL="claude-haiku-4-5-20251001"
+          if [[ "$MESSAGE" == "!aeon think "* ]]; then
+            CHAT_MODEL="claude-3-5-sonnet-latest"
+            MESSAGE="${MESSAGE#!aeon think }"
+
+          elif [[ "$MESSAGE" == "!aeon ask "* ]]; then
+            CHAT_MODEL="claude-3-5-haiku-latest"
+            MESSAGE="${MESSAGE#!aeon ask }"
+
+          else
+            CHAT_MODEL="claude-3-5-haiku-latest"
+          fi
 
           API_RESPONSE=$(jq -n \
             --arg model "$CHAT_MODEL" \
