@@ -700,19 +700,11 @@ jobs:
           fi
           NOTIFY_SCRIPT
           chmod +x ./notify
-
-          ALLOWED="Read,Write,Edit,Glob,Grep,WebFetch,WebSearch"
-          ALLOWED="$ALLOWED,Bash(curl:*),Bash(gh:*),Bash(git:*),Bash(jq:*)"
-          ALLOWED="$ALLOWED,Bash(./notify:*)"
-          ALLOWED="$ALLOWED,Bash(mkdir:*),Bash(ls:*),Bash(cat:*),Bash(chmod:*)"
-          ALLOWED="$ALLOWED,Bash(date:*),Bash(echo:*),Bash(node:*),Bash(npm:*),Bash(npx:*)"
-          ALLOWED="$ALLOWED,Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(sort:*),Bash(grep:*)"
-
+          
           SOURCE="$_MSG_SOURCE"
           MESSAGE="$_MSG_MESSAGE"
-          # Cost control: only invoke Claude for explicit Aeon commands.
-          # Example Slack message: !aeon summarize today's repo changes
-                    case "$MESSAGE" in
+
+          case "$MESSAGE" in
             "!aeon claude "*)
               MESSAGE="${MESSAGE#!aeon claude }"
               ;;
@@ -727,32 +719,36 @@ jobs:
               exit 0
               ;;
           esac
-          PROMPT="Today is $TODAY. You received this message from the user on ${SOURCE}:
 
-          \"$MESSAGE\"
+          CHAT_MODEL="claude-haiku-4-5-20251001"
 
-          Read memory/MEMORY.md for context. Look at the available skills in skills/ to understand what you can do.
+          API_RESPONSE=$(jq -n \
+            --arg model "$CHAT_MODEL" \
+            --arg msg "$MESSAGE" \
+            '{
+              model: $model,
+              max_tokens: 300,
+              system: "You are Aeon. Answer concisely. Do not inspect the repo unless explicitly asked.",
+              messages: [{role: "user", content: $msg}]
+            }' | curl -s https://api.anthropic.com/v1/messages \
+              -H "x-api-key: '"$ANTHROPIC_API_KEY"'" \
+              -H "anthropic-version: 2023-06-01" \
+              -H "content-type: application/json" \
+              -d @-)
 
-          Interpret what the user wants and act on it:
-          - If they want you to run a skill (e.g. \"write an article about X\", \"send me a digest\"), read that skill file and execute it.
-          - If they want information or have a question, research it and respond.
-          - If they want you to remember something, update memory/MEMORY.md.
-          - For anything else, do your best and explain what you did.
+          RESULT=$(echo "$API_RESPONSE" | jq -r '.content[0].text // empty')
 
-          Always send your response back via ./notify so the user sees it."
-          if ! CLAUDE_OUTPUT=$(echo "$PROMPT" | claude -p - \
-            --model "$MODEL" --allowedTools "$ALLOWED" \
-            --output-format json 2>&1); then
-            echo "::error::Claude CLI failed. Output: $CLAUDE_OUTPUT"
+          if [ -z "$RESULT" ]; then
+            echo "::error::Anthropic API failed. Output: $API_RESPONSE"
             exit 1
           fi
 
-          echo "$CLAUDE_OUTPUT" | jq -r '.result // empty'
+          ./notify "$RESULT"
 
-          INPUT_TOKENS=$(echo "$CLAUDE_OUTPUT" | jq '.usage.input_tokens // 0')
-          OUTPUT_TOKENS=$(echo "$CLAUDE_OUTPUT" | jq '.usage.output_tokens // 0')
-          CACHE_READ=$(echo "$CLAUDE_OUTPUT" | jq '.usage.cache_read_input_tokens // 0')
-          CACHE_CREATION=$(echo "$CLAUDE_OUTPUT" | jq '.usage.cache_creation_input_tokens // 0')
+          INPUT_TOKENS=$(echo "$API_RESPONSE" | jq '.usage.input_tokens // 0')
+          OUTPUT_TOKENS=$(echo "$API_RESPONSE" | jq '.usage.output_tokens // 0')
+          CACHE_READ=0
+          CACHE_CREATION=0
           TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
 
           echo "SKILL_INPUT_TOKENS=$INPUT_TOKENS" >> "$GITHUB_OUTPUT"
