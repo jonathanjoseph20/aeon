@@ -731,7 +731,7 @@ jobs:
               system: "You are Aeon. Answer concisely. Do not inspect the repo unless explicitly asked.",
               messages: [{role: "user", content: $msg}]
             }' | curl -s https://api.anthropic.com/v1/messages \
-              -H "x-api-key: '"$ANTHROPIC_API_KEY"'" \
+              -H "x-api-key: '"$ANTHROPIC_API_KEY" \
               -H "anthropic-version: 2023-06-01" \
               -H "content-type: application/json" \
               -d @-)
