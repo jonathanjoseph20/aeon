@@ -12,6 +12,12 @@ on:
         description: Message text
         required: true
         type: string
+      slack_channel:
+        required: false
+        type: string
+      slack_thread_ts:
+        required: false
+        type: string
         
 permissions:
   contents: write
@@ -105,6 +111,8 @@ jobs:
           ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
           _MSG_SOURCE: ${{ steps.msg.outputs.source }}
           _MSG_MESSAGE: ${{ steps.msg.outputs.message }}
+          _SLACK_CHANNEL: ${{ github.event.inputs.slack_channel }}
+          _SLACK_THREAD_TS: ${{ github.event.inputs.slack_thread_ts }}
         run: |
           TODAY=$(date -u +%Y-%m-%d)
           CONFIG_MODEL=$(grep -E '^model:' aeon.yml | sed 's/^model: *//' | tr -d ' ')
@@ -124,7 +132,16 @@ jobs:
               -H "Content-Type: application/json" \
               -d "$(jq -n --arg text "$MSG" '{content: $text}')" > /dev/null || true
           fi
-          if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+          if [ -n "${_SLACK_CHANNEL:-}" ] && [ -n "${_SLACK_THREAD_TS:-}" ] && [ -n "${SLACK_BOT_TOKEN:-}" ]; then
+            curl -sf -X POST "https://slack.com/api/chat.postMessage" \
+              -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+              -H "Content-Type: application/json; charset=utf-8" \
+              -d "$(jq -n \
+                --arg channel "$_SLACK_CHANNEL" \
+                --arg thread "$_SLACK_THREAD_TS" \
+                --arg text "$MSG" \
+                '{channel: $channel, thread_ts: $thread, text: $text}')" > /dev/null || true
+          elif [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
             curl -sf -X POST "$SLACK_WEBHOOK_URL" \
               -H "Content-Type: application/json" \
               -d "$(jq -n --arg text "$MSG" '{text: $text}')" > /dev/null || true
@@ -167,12 +184,19 @@ jobs:
             CHAT_MODEL="claude-haiku-4-5-20251001"
           fi
 
+          if [[ "$CHAT_MODEL" == "claude-sonnet-4-6" ]]; then
+            MAX_TOKENS=600
+          else
+            MAX_TOKENS=150
+          fi
+
           API_RESPONSE=$(jq -n \
             --arg model "$CHAT_MODEL" \
             --arg msg "$MESSAGE" \
+            --argjson max_tokens "$MAX_TOKENS" \
             '{
               model: $model,
-              max_tokens: 300,
+              max_tokens: $max_tokens,
               system: "You are Aeon. Answer concisely. Do not inspect the repo unless explicitly asked.",
               messages: [{role: "user", content: $msg}]
             }' | curl -s https://api.anthropic.com/v1/messages \
