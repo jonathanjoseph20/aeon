@@ -1,0 +1,271 @@
+name: Message Worker
+run-name: "${{ inputs.message && format('msg ({0}): {1}', inputs.source || 'user', inputs.message) || 'tick: schedule + poll' }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Message source
+        required: true
+        type: string
+      message:
+        description: Message text
+        required: true
+        type: string
+        
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+  actions: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NODE_OPTIONS: '--no-deprecation'
+
+# Poll/schedule runs serialize (prevent duplicate ticks). Message runs get unique groups (parallel execution).
+concurrency:
+  group: ${{ (github.event_name == 'repository_dispatch' || (github.event_name == 'workflow_dispatch' && inputs.message != '')) && format('aeon-msg-{0}', github.run_id) || 'aeon-tick' }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: github.event_name == 'repository_dispatch' || (github.event_name == 'workflow_dispatch' && inputs.message != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Extract message
+        id: msg
+        env:
+          _INPUT_MESSAGE: ${{ inputs.message }}
+          _INPUT_SOURCE: ${{ inputs.source }}
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            MESSAGE=$(echo '${{ toJson(github.event.client_payload.message) }}' | jq -r '.')
+            TYPE="${{ github.event.action }}"
+            SOURCE="webhook"
+            case "$TYPE" in
+              telegram-message) SOURCE="telegram" ;;
+              discord-message) SOURCE="discord" ;;
+              slack-message) SOURCE="slack" ;;
+            esac
+          else
+            MESSAGE="$_INPUT_MESSAGE"
+            SOURCE="$_INPUT_SOURCE"
+          fi
+
+          if [ -n "$MESSAGE" ] && [ "$MESSAGE" != "null" ]; then
+            echo "source=$SOURCE" >> "$GITHUB_OUTPUT"
+            echo "message<<ENDOFMESSAGE" >> "$GITHUB_OUTPUT"
+            echo "$MESSAGE" >> "$GITHUB_OUTPUT"
+            echo "ENDOFMESSAGE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repo
+        if: steps.msg.outputs.source != ''
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GH_GLOBAL || secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        if: steps.msg.outputs.source != ''
+        run: |
+          git config user.name "aeonframework"
+          git config user.email "aeonframework@proton.me"
+
+      - name: Setup Node.js
+        if: steps.msg.outputs.source != ''
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code
+        if: steps.msg.outputs.source != ''
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run
+        id: run
+        if: steps.msg.outputs.source != ''
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_GLOBAL || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_GLOBAL || secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+          _MSG_SOURCE: ${{ steps.msg.outputs.source }}
+          _MSG_MESSAGE: ${{ steps.msg.outputs.message }}
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          CONFIG_MODEL=$(grep -E '^model:' aeon.yml | sed 's/^model: *//' | tr -d ' ')
+          MODEL="${CONFIG_MODEL:-claude-opus-4-7}"
+
+          cat > ./notify << 'NOTIFY_SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          MSG="$1"
+          if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+            curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg chat "$TELEGRAM_CHAT_ID" --arg text "$MSG" '{chat_id: $chat, text: $text, parse_mode: "Markdown"}')" > /dev/null || true
+          fi
+          if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+            curl -sf -X POST "$DISCORD_WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg text "$MSG" '{content: $text}')" > /dev/null || true
+          fi
+          if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+            curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg text "$MSG" '{text: $text}')" > /dev/null || true
+          fi
+          NOTIFY_SCRIPT
+          chmod +x ./notify
+          
+          SOURCE="$_MSG_SOURCE"
+          MESSAGE="$_MSG_MESSAGE"
+
+          case "$MESSAGE" in
+            "!aeon claude "*)
+              MESSAGE="${MESSAGE#!aeon claude }"
+              ;;
+            *)
+              ./notify "I only use Claude for explicit heavy tasks now. Try: !aeon ping, !aeon help, or !aeon claude <task>"
+              echo "Ignoring non-Claude command from $SOURCE"
+              echo "SKILL_INPUT_TOKENS=0" >> "$GITHUB_OUTPUT"
+              echo "SKILL_OUTPUT_TOKENS=0" >> "$GITHUB_OUTPUT"
+              echo "SKILL_CACHE_READ_TOKENS=0" >> "$GITHUB_OUTPUT"
+              echo "SKILL_CACHE_CREATION_TOKENS=0" >> "$GITHUB_OUTPUT"
+              echo "SKILL_TOTAL_TOKENS=0" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          CHAT_MODEL="claude-haiku-4-5-20251001"
+
+          API_RESPONSE=$(jq -n \
+            --arg model "$CHAT_MODEL" \
+            --arg msg "$MESSAGE" \
+            '{
+              model: $model,
+              max_tokens: 300,
+              system: "You are Aeon. Answer concisely. Do not inspect the repo unless explicitly asked.",
+              messages: [{role: "user", content: $msg}]
+            }' | curl -s https://api.anthropic.com/v1/messages \
+              -H "x-api-key: $ANTHROPIC_API_KEY" \
+              -H "anthropic-version: 2023-06-01" \
+              -H "content-type: application/json" \
+              -d @-)
+
+          RESULT=$(echo "$API_RESPONSE" | jq -r '.content[0].text // empty')
+
+          if [ -z "$RESULT" ]; then
+            echo "::error::Anthropic API failed. Output: $API_RESPONSE"
+            exit 1
+          fi
+
+          ./notify "$RESULT"
+
+          INPUT_TOKENS=$(echo "$API_RESPONSE" | jq '.usage.input_tokens // 0')
+          OUTPUT_TOKENS=$(echo "$API_RESPONSE" | jq '.usage.output_tokens // 0')
+          CACHE_READ=0
+          CACHE_CREATION=0
+          TOTAL_TOKENS=$((INPUT_TOKENS + OUTPUT_TOKENS))
+
+          echo "SKILL_INPUT_TOKENS=$INPUT_TOKENS" >> "$GITHUB_OUTPUT"
+          echo "SKILL_OUTPUT_TOKENS=$OUTPUT_TOKENS" >> "$GITHUB_OUTPUT"
+          echo "SKILL_CACHE_READ_TOKENS=$CACHE_READ" >> "$GITHUB_OUTPUT"
+          echo "SKILL_CACHE_CREATION_TOKENS=$CACHE_CREATION" >> "$GITHUB_OUTPUT"
+          echo "SKILL_TOTAL_TOKENS=$TOTAL_TOKENS" >> "$GITHUB_OUTPUT"
+
+          echo "::notice::Token usage — input: $INPUT_TOKENS, output: $OUTPUT_TOKENS, cache_read: $CACHE_READ, cache_creation: $CACHE_CREATION, total: $TOTAL_TOKENS"
+
+      - name: Log token usage
+        if: steps.msg.outputs.source != ''
+        env:
+          _LOG_SOURCE: ${{ steps.msg.outputs.source }}
+          _LOG_INPUT: ${{ steps.run.outputs.SKILL_INPUT_TOKENS }}
+          _LOG_OUTPUT: ${{ steps.run.outputs.SKILL_OUTPUT_TOKENS }}
+          _LOG_CACHE_READ: ${{ steps.run.outputs.SKILL_CACHE_READ_TOKENS }}
+          _LOG_CACHE_CREATION: ${{ steps.run.outputs.SKILL_CACHE_CREATION_TOKENS }}
+          _LOG_TOTAL: ${{ steps.run.outputs.SKILL_TOTAL_TOKENS }}
+        run: |
+          SOURCE="$_LOG_SOURCE"
+          INPUT="$_LOG_INPUT"
+          OUTPUT="$_LOG_OUTPUT"
+          CACHE_READ="$_LOG_CACHE_READ"
+          CACHE_CREATION="$_LOG_CACHE_CREATION"
+          TOTAL="$_LOG_TOTAL"
+          echo "## Token Usage: message ($SOURCE)" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Metric | Tokens |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Input | $INPUT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Output | $OUTPUT |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Cache read | $CACHE_READ |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Cache creation | $CACHE_CREATION |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Total** | **$TOTAL** |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit results
+        if: steps.msg.outputs.source != ''
+        env:
+          _COMMIT_SOURCE: ${{ steps.msg.outputs.source }}
+        run: |
+          git config user.name "aeonframework"
+          git config user.email "aeonframework@proton.me"
+          rm -f ./notify
+
+          CURRENT_BRANCH=$(git branch --show-current)
+          SOURCE="$_COMMIT_SOURCE"
+
+          if [ "$CURRENT_BRANCH" != "main" ] && [ -n "$CURRENT_BRANCH" ]; then
+            echo "On feature branch: $CURRENT_BRANCH"
+            git add -A
+            git diff --staged --quiet || git commit -m "chore($SOURCE): auto-commit $(date +%Y-%m-%d)"
+            git push --force-with-lease -u origin "$CURRENT_BRANCH" || true
+
+            git checkout -f main
+            git pull --rebase origin main || true
+          fi
+
+          git add -A
+          git diff --staged --quiet && exit 0
+          git commit -m "chore($SOURCE): auto-commit $(date +%Y-%m-%d)"
+          JITTER=$((RANDOM % 10))
+          echo "Waiting ${JITTER}s jitter before push..."
+          sleep "$JITTER"
+          for i in 1 2 3 4 5; do
+            if git pull --rebase origin main; then
+              git push -u origin HEAD && exit 0
+            else
+              echo "Rebase conflict on attempt $i, auto-resolving..."
+              for f in $(git diff --name-only --diff-filter=U); do
+                if [[ "$f" == memory/logs/* ]] || [[ "$f" == memory/topics/* ]] || [[ "$f" == memory/MEMORY.md ]]; then
+                  sed -i '/^<<<<<<< /d; /^=======/d; /^>>>>>>> /d' "$f"
+                  git add "$f"
+                else
+                  git checkout --theirs "$f"
+                  git add "$f"
+                fi
+              done
+              if git diff --cached --quiet; then
+                git rebase --skip
+              else
+                GIT_EDITOR=true git rebase --continue
+              fi
+            fi
+            BACKOFF=$(( (2 ** i) + RANDOM % 5 ))
+            echo "Push attempt $i failed, retrying in ${BACKOFF}s..."
+            sleep "$BACKOFF"
+          done
+          echo "Failed to push after 5 attempts"
+          exit 1
