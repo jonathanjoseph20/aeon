@@ -524,7 +524,7 @@ jobs:
           fi
 
           # --- Slack (collect ALL unprocessed messages) ---
-          if [ -n "${SLACK_BOT_TOKEN:-}" ] && [ -n "${SLACK_CHANNEL_ID:-}" ]; then
+          if false && [ -n "${SLACK_BOT_TOKEN:-}" ] && [ -n "${SLACK_CHANNEL_ID:-}" ]; then
             RESPONSE=$(curl -s -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
               "https://slack.com/api/conversations.history?channel=$SLACK_CHANNEL_ID&limit=10")
             COUNT=$(echo "$RESPONSE" | jq '.messages | length')
