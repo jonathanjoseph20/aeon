@@ -96,7 +96,10 @@ with digest_path.open("a") as f:
             subject = item.get("subject", "(no subject)")
             priority = item.get("priority", "low")
             tags = ", ".join(item.get("verticals", []))
-            preview = item.get("content_preview", "").replace("\n", " ")
+            preview = (
+                item.get("summary")
+                or item.get("content_preview", "")
+            ).replace("\n", " ")
 
             importance_score = get_importance_score(item)
             signal_band = get_signal_band(importance_score)
