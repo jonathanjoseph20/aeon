@@ -1,0 +1,22 @@
+{
+  "sacra.com": {
+    "name": "Sacra",
+    "default_verticals": ["RWA"],
+    "priority": "medium",
+    "importance_score": 6
+  },
+
+  "banklesshq.com": {
+    "name": "Bankless",
+    "default_verticals": ["DeFi"],
+    "priority": "high",
+    "importance_score": 8
+  },
+
+  "venice.ai": {
+    "name": "Venice",
+    "default_verticals": ["AI", "Portfolio"],
+    "priority": "high",
+    "importance_score": 9
+  }
+}
