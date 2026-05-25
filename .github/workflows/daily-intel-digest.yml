@@ -27,6 +27,7 @@ jobs:
           pip install google-auth-httplib2
           pip install google-auth-oauthlib
           pip install beautifulsoup4
+          pip install pyyaml
 
       - name: Restore Gmail token
         env:
