@@ -41,9 +41,9 @@ for label_name, label_id in gmail_labels.items():
 
     print(f"{label_name}: {len(label_messages)} emails found")
 
-for m in label_messages:
-    m["aeon_gmail_label"] = label_name
-    messages.append(m)
+    for m in label_messages:
+        m["aeon_gmail_label"] = label_name
+        messages.append(m)
 
 print(f"\nFound {len(messages)} emails\n")
 
