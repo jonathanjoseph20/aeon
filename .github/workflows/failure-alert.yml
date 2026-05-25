@@ -1,0 +1,38 @@
+name: Failure Alert
+
+on:
+  workflow_run:
+    workflows:
+      - "*"
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  alert:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send failure alert to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+
+          MESSAGE="🚨 Aeon workflow failed
+Workflow: $WORKFLOW_NAME
+Branch: $BRANCH
+Commit: $SHORT_SHA
+Run: $WORKFLOW_URL"
+
+          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg text "$MESSAGE" '{text: $text}')" > /dev/null
