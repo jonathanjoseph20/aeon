@@ -4,6 +4,18 @@ import hashlib
 from pathlib import Path
 from datetime import datetime, UTC
 
+IGNORE_SUBJECT_PATTERNS = [
+    "welcome",
+    "complete your sign up",
+    "confirm your email",
+    "verify your email",
+    "activate your account",
+    "thanks for subscribing",
+    "please confirm",
+    "confirm subscription",
+    "complete your signup"
+]
+
 with open("config/verticals.yml", "r") as f:
     verticals = yaml.safe_load(f)
 
@@ -28,6 +40,8 @@ for email_path in files:
 
     metadata = {
         "source_name": "Unknown",
+        "source_domain": "",
+        "known_source": "",
         "sender": "",
         "subject": "",
         "priority": "low",
@@ -47,6 +61,18 @@ for email_path in files:
         if line.startswith("SOURCE:"):
             metadata["source_name"] = line.replace("SOURCE:", "").strip()
 
+        elif line.startswith("SOURCE_DOMAIN:"):
+            metadata["source_domain"] = line.replace(
+                "SOURCE_DOMAIN:",
+                ""
+            ).strip()
+
+        elif line.startswith("KNOWN_SOURCE:"):
+            metadata["known_source"] = line.replace(
+                "KNOWN_SOURCE:",
+                ""
+            ).strip()
+
         elif line.startswith("SENDER:"):
             metadata["sender"] = line.replace("SENDER:", "").strip()
 
@@ -61,7 +87,7 @@ for email_path in files:
                 "GMAIL_LABEL:",
                 ""
             ).strip()
-        
+
         elif line.startswith("IMPORTANCE_SCORE:"):
             metadata["importance_score"] = int(
                 line.replace("IMPORTANCE_SCORE:", "").strip()
@@ -69,6 +95,12 @@ for email_path in files:
 
         else:
             body_lines.append(line)
+
+    subject_lower = metadata["subject"].lower()
+
+    if any(pattern in subject_lower for pattern in IGNORE_SUBJECT_PATTERNS):
+        print(f"Ignored noise: {email_path.name} — {metadata['subject']}")
+        continue
 
     content = " ".join(body_lines).strip()
 
@@ -106,6 +138,8 @@ for email_path in files:
         "source_type": "email_manual",
         "source_file": str(email_path),
         "source_name": metadata["source_name"],
+        "source_domain": metadata["source_domain"],
+        "known_source": metadata["known_source"],
         "sender": metadata["sender"],
         "subject": metadata["subject"],
         "priority": metadata["priority"],
