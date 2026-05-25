@@ -173,21 +173,23 @@ jobs:
           esac
 
           if [[ "$MESSAGE" == "!aeon think "* ]]; then
-            CHAT_MODEL="claude-sonnet-4-6"
-            MESSAGE="${MESSAGE#!aeon think }"
+          CHAT_MODEL="claude-sonnet-4-20250514"
+          MAX_TOKENS=600
+          MESSAGE="${MESSAGE#!aeon think }"
 
           elif [[ "$MESSAGE" == "!aeon ask "* ]]; then
-            CHAT_MODEL="claude-haiku-4-5-20251001"
-            MESSAGE="${MESSAGE#!aeon ask }"
+          CHAT_MODEL="claude-haiku-4-5-20251001"
+          MAX_TOKENS=150
+          MESSAGE="${MESSAGE#!aeon ask }"
+
+          elif [[ "$MESSAGE" == "!aeon claude "* ]]; then
+          CHAT_MODEL="claude-sonnet-4-20250514"
+          MAX_TOKENS=1200
+          MESSAGE="${MESSAGE#!aeon claude }"
 
           else
-            CHAT_MODEL="claude-haiku-4-5-20251001"
-          fi
-
-          if [[ "$CHAT_MODEL" == "claude-sonnet-4-6" ]]; then
-            MAX_TOKENS=600
-          else
-            MAX_TOKENS=150
+          CHAT_MODEL="claude-haiku-4-5-20251001"
+          MAX_TOKENS=150
           fi
 
           API_RESPONSE=$(jq -n \
