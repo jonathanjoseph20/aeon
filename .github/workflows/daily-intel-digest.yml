@@ -46,6 +46,10 @@ jobs:
         run: |
           python3 scripts/ingestion/fetch_gmail.py
 
+      - name: Promote source candidates
+        run: |
+          python3 scripts/ingestion/promote_source_candidates.py
+
       - name: Classify intake
         run: |
           python3 scripts/ingestion/classify_email.py
