@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 import json
 import base64
+import re
+from email.utils import parseaddr
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -22,13 +24,34 @@ Path("credentials").mkdir(parents=True, exist_ok=True)
 
 creds = None
 
+
+def infer_source_from_sender(sender):
+    display_name, email = parseaddr(sender)
+
+    domain = email.split("@")[-1].lower() if "@" in email else ""
+
+    suggested_name = display_name.strip().replace('"', "")
+
+    if not suggested_name and domain:
+        suggested_name = (
+            domain.split(".")[0]
+            .replace("-", " ")
+            .replace("_", " ")
+            .title()
+        )
+
+    return domain, suggested_name
+
+
 if os.path.exists(token_path):
+
     creds = Credentials.from_authorized_user_file(
         token_path,
         SCOPES
     )
 
 if creds and creds.expired and creds.refresh_token:
+
     creds.refresh(Request())
 
 if not creds or not creds.valid:
@@ -74,6 +97,11 @@ print(f"\nFound {len(messages)} emails\n")
 output_dir = Path("data/intake/email")
 output_dir.mkdir(parents=True, exist_ok=True)
 
+candidate_dir = Path("data/metadata")
+candidate_dir.mkdir(parents=True, exist_ok=True)
+
+candidate_path = candidate_dir / "source_candidates.jsonl"
+
 for msg in messages:
 
     msg_id = msg["id"]
@@ -99,17 +127,27 @@ for msg in messages:
 
     gmail_label = msg.get("aeon_gmail_label", "")
 
-    source_name = "Unknown"
+    domain, suggested_name = infer_source_from_sender(sender)
+
+    source_name = suggested_name or "Unknown"
     priority = "low"
     importance_score = 1
+    default_verticals = []
+    known_source = False
 
-    for domain, metadata in source_registry.items():
+    for registered_domain, metadata in source_registry.items():
 
-        if domain.lower() in sender.lower():
+        if registered_domain.lower() in sender.lower():
 
             source_name = metadata["name"]
             priority = metadata["priority"]
             importance_score = metadata["importance_score"]
+            default_verticals = metadata.get(
+                "default_verticals",
+                []
+            )
+
+            known_source = True
 
             break
 
@@ -148,8 +186,25 @@ for msg in messages:
     if not body_data.strip():
         continue
 
+    if not known_source and domain:
+
+        candidate = {
+            "domain": domain,
+            "sender": sender,
+            "subject": subject,
+            "gmail_label": gmail_label,
+            "suggested_name": source_name,
+            "priority": priority,
+            "importance_score": importance_score
+        }
+
+        with candidate_path.open("a") as f:
+            f.write(json.dumps(candidate) + "\n")
+
     full_content = (
         f"SOURCE: {source_name}\n"
+        f"SOURCE_DOMAIN: {domain}\n"
+        f"KNOWN_SOURCE: {known_source}\n"
         f"SENDER: {sender}\n"
         f"SUBJECT: {subject}\n"
         f"PRIORITY: {priority}\n"
