@@ -4,6 +4,7 @@ from datetime import datetime, UTC
 from pathlib import Path
 
 log_path = Path("data/processed/intake_log.jsonl")
+cluster_path = Path("data/processed/topic_clusters.jsonl")
 digest_path = Path("data/processed/daily_digest.md")
 
 digest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -41,11 +42,52 @@ def get_signal_band(score):
     return "Low Priority"
 
 
+def load_clusters():
+    if not cluster_path.exists():
+        return []
+
+    clusters = []
+
+    for line in cluster_path.read_text().splitlines():
+        if not line.strip():
+            continue
+
+        cluster = json.loads(line)
+
+        if int(cluster.get("cluster_size", 0)) < 2:
+            continue
+
+        clusters.append(cluster)
+
+    return sorted(
+        clusters,
+        key=lambda c: int(c.get("cluster_size", 0)),
+        reverse=True
+    )
+
+
 with digest_path.open("w") as f:
     f.write("# Daily Intelligence Digest\n\n")
     f.write(
         f"Generated: {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}\n\n"
     )
+
+clusters = load_clusters()
+
+with digest_path.open("a") as f:
+    if clusters:
+        f.write("## Topic Clusters\n\n")
+
+        for cluster in clusters[:5]:
+            keywords = ", ".join(cluster.get("keywords", [])[:6])
+            cluster_size = cluster.get("cluster_size", 0)
+
+            f.write(
+                f"- **{cluster_size} related items** — "
+                f"keywords: {keywords}\n"
+            )
+
+        f.write("\n")
 
 if not log_path.exists():
     with digest_path.open("a") as f:
