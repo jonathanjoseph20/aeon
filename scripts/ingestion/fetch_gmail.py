@@ -24,16 +24,26 @@ service = build("gmail", "v1", credentials=creds)
 with open("data/metadata/email_sources.json", "r") as f:
     source_registry = json.load(f)
 
-# Change label here
-label_id = "Label_195904735065236313"
+with open("config/gmail_labels.json", "r") as f:
+    gmail_labels = json.load(f)
 
-results = service.users().messages().list(
-    userId="me",
-    labelIds=[label_id],
-    maxResults=5
-).execute()
+messages = []
 
-messages = results.get("messages", [])
+for label_name, label_id in gmail_labels.items():
+
+    results = service.users().messages().list(
+        userId="me",
+        labelIds=[label_id],
+        maxResults=5
+    ).execute()
+
+    label_messages = results.get("messages", [])
+
+    print(f"{label_name}: {len(label_messages)} emails found")
+
+for m in label_messages:
+    m["aeon_gmail_label"] = label_name
+    messages.append(m)
 
 print(f"\nFound {len(messages)} emails\n")
 
@@ -62,6 +72,8 @@ for msg in messages:
 
         elif header["name"] == "From":
             sender = header["value"]
+
+    gmail_label = msg.get("aeon_gmail_label", "")
 
     source_name = "Unknown"
     priority = "low"
@@ -117,6 +129,7 @@ for msg in messages:
         f"SENDER: {sender}\n"
         f"SUBJECT: {subject}\n"
         f"PRIORITY: {priority}\n"
+        f"GMAIL_LABEL: {gmail_label}\n"
         f"IMPORTANCE_SCORE: {importance_score}\n\n"
         f"{body_data}\n"
     )

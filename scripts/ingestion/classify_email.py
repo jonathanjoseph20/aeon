@@ -31,7 +31,8 @@ for email_path in files:
         "sender": "",
         "subject": "",
         "priority": "low",
-        "importance_score": 1
+        "importance_score": 1,
+        "gmail_label": ""
     }
 
     body_lines = []
@@ -55,6 +56,12 @@ for email_path in files:
         elif line.startswith("PRIORITY:"):
             metadata["priority"] = line.replace("PRIORITY:", "").strip()
 
+        elif line.startswith("GMAIL_LABEL:"):
+            metadata["gmail_label"] = line.replace(
+                "GMAIL_LABEL:",
+                ""
+            ).strip()
+        
         elif line.startswith("IMPORTANCE_SCORE:"):
             metadata["importance_score"] = int(
                 line.replace("IMPORTANCE_SCORE:", "").strip()
@@ -103,6 +110,7 @@ for email_path in files:
         "subject": metadata["subject"],
         "priority": metadata["priority"],
         "importance_score": metadata["importance_score"],
+        "gmail_label": metadata["gmail_label"],
         "verticals": matched_verticals,
         "scores": scores,
         "content_preview": content[:200]
