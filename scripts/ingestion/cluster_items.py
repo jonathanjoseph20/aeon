@@ -1,6 +1,5 @@
 import json
 import hashlib
-from collections import defaultdict
 from pathlib import Path
 
 log_path = Path("data/processed/intake_log.jsonl")
@@ -14,12 +13,15 @@ STOPWORDS = {
     "the", "and", "for", "with", "that",
     "this", "from", "your", "about",
     "into", "what", "welcome", "have",
-    "will", "their", "they", "been"
+    "will", "their", "they", "been",
+    "you", "our", "are", "was", "were",
+    "can", "has", "had", "but", "not",
+    "all", "more", "new", "today",
+    "email", "newsletter", "read"
 }
 
 KEYWORD_MIN_LENGTH = 4
-
-clusters = defaultdict(list)
+MIN_SHARED_KEYWORDS = 3
 
 
 def extract_keywords(text):
@@ -43,53 +45,104 @@ def extract_keywords(text):
     return sorted(set(tokens))
 
 
+def get_item_id(item):
+    return (
+        item.get("id")
+        or item.get("item_id")
+        or item.get("hash")
+        or "unknown"
+    )
+
+
+def item_text(item):
+    subject = item.get("subject", "")
+    summary = item.get("summary", "")
+    preview = item.get("content_preview", "")
+
+    return f"{subject} {summary} {preview}"
+
+
+items = []
+
 for line in log_path.read_text().splitlines():
 
     if not line.strip():
         continue
 
     item = json.loads(line)
-
-    subject = item.get("subject", "")
-    summary = item.get("summary", "")
-
-    combined = f"{subject} {summary}"
-
-    keywords = extract_keywords(combined)
+    keywords = extract_keywords(item_text(item))
 
     if not keywords:
         continue
 
-    topic_fingerprint = hashlib.sha256(
-        " ".join(keywords[:8]).encode("utf-8")
-    ).hexdigest()[:12]
+    item["cluster_keywords"] = keywords[:15]
 
-    item["cluster_keywords"] = keywords[:10]
-    item["topic_fingerprint"] = topic_fingerprint
+    items.append(item)
 
-    clusters[topic_fingerprint].append(item)
+clusters = []
+
+for item in items:
+
+    item_keywords = set(item["cluster_keywords"])
+    matched_cluster = None
+    best_overlap = 0
+
+    for cluster in clusters:
+
+        cluster_keywords = set(cluster["keywords"])
+        overlap = len(item_keywords.intersection(cluster_keywords))
+
+        if overlap > best_overlap:
+            best_overlap = overlap
+            matched_cluster = cluster
+
+    if matched_cluster and best_overlap >= MIN_SHARED_KEYWORDS:
+
+        matched_cluster["items"].append(item)
+
+        merged_keywords = sorted(
+            set(matched_cluster["keywords"]).union(item_keywords)
+        )
+
+        matched_cluster["keywords"] = merged_keywords[:20]
+
+    else:
+
+        seed = " ".join(item["cluster_keywords"][:8])
+        fingerprint = hashlib.sha256(
+            seed.encode("utf-8")
+        ).hexdigest()[:12]
+
+        clusters.append(
+            {
+                "topic_fingerprint": fingerprint,
+                "keywords": item["cluster_keywords"],
+                "items": [item]
+            }
+        )
 
 with cluster_path.open("w") as f:
 
-    for fingerprint, items in clusters.items():
+    for cluster in clusters:
 
-        cluster = {
-            "topic_fingerprint": fingerprint,
-            "cluster_size": len(items),
-            "keywords": items[0]["cluster_keywords"],
+        cluster_items = cluster["items"]
+
+        record = {
+            "topic_fingerprint": cluster["topic_fingerprint"],
+            "cluster_size": len(cluster_items),
+            "keywords": cluster["keywords"][:12],
             "items": [
                 {
+                    "item_id": get_item_id(item),
                     "source": item.get("source_name"),
                     "subject": item.get("subject"),
                     "verticals": item.get("verticals"),
-                    "importance_score": item.get(
-                        "importance_score"
-                    )
+                    "importance_score": item.get("importance_score")
                 }
-                for item in items
+                for item in cluster_items
             ]
         }
 
-        f.write(json.dumps(cluster) + "\n")
+        f.write(json.dumps(record) + "\n")
 
 print(f"Generated {len(clusters)} topic clusters.")
