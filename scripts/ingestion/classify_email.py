@@ -16,6 +16,16 @@ IGNORE_SUBJECT_PATTERNS = [
     "complete your signup"
 ]
 
+GMAIL_LABEL_VERTICAL_PRIORS = {
+    "Research/AI": ["AI"],
+    "Research/RWA_Tokenization": ["RWA"],
+    "Research/PrivateMarkets": ["RWA"],
+    "Research/Macro": ["Macro"],
+    "Research/Portfolio_Assets": ["Portfolio"],
+    "Research/DeFi": ["DeFi"],
+    "Research/Personal": ["Personal"]
+}
+
 with open("config/verticals.yml", "r") as f:
     verticals = yaml.safe_load(f)
 
@@ -62,16 +72,10 @@ for email_path in files:
             metadata["source_name"] = line.replace("SOURCE:", "").strip()
 
         elif line.startswith("SOURCE_DOMAIN:"):
-            metadata["source_domain"] = line.replace(
-                "SOURCE_DOMAIN:",
-                ""
-            ).strip()
+            metadata["source_domain"] = line.replace("SOURCE_DOMAIN:", "").strip()
 
         elif line.startswith("KNOWN_SOURCE:"):
-            metadata["known_source"] = line.replace(
-                "KNOWN_SOURCE:",
-                ""
-            ).strip()
+            metadata["known_source"] = line.replace("KNOWN_SOURCE:", "").strip()
 
         elif line.startswith("SENDER:"):
             metadata["sender"] = line.replace("SENDER:", "").strip()
@@ -83,10 +87,7 @@ for email_path in files:
             metadata["priority"] = line.replace("PRIORITY:", "").strip()
 
         elif line.startswith("GMAIL_LABEL:"):
-            metadata["gmail_label"] = line.replace(
-                "GMAIL_LABEL:",
-                ""
-            ).strip()
+            metadata["gmail_label"] = line.replace("GMAIL_LABEL:", "").strip()
 
         elif line.startswith("IMPORTANCE_SCORE:"):
             metadata["importance_score"] = int(
@@ -103,7 +104,6 @@ for email_path in files:
         continue
 
     content = " ".join(body_lines).strip()
-
     normalized = content.lower()
 
     item_id = hashlib.sha256(
@@ -119,13 +119,26 @@ for email_path in files:
     for vertical, data in verticals.items():
 
         keywords = data.get("keywords", [])
-
         score = 0
 
         for keyword in keywords:
             score += normalized.count(keyword.lower())
 
         scores[vertical] = score
+
+    # Add Gmail label priors.
+    label_verticals = GMAIL_LABEL_VERTICAL_PRIORS.get(
+        metadata["gmail_label"],
+        []
+    )
+
+    for vertical in label_verticals:
+        scores[vertical] = scores.get(vertical, 0) + 3
+
+    # Known high-importance sources get a small confidence boost.
+    if metadata["known_source"] == "True":
+        for vertical in label_verticals:
+            scores[vertical] = scores.get(vertical, 0) + 1
 
     matched_verticals = [
         vertical for vertical, score in scores.items()
