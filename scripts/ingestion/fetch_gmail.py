@@ -1,4 +1,5 @@
 import sys
+import os
 from pathlib import Path
 import json
 import base64
@@ -6,25 +7,41 @@ import base64
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from utils.clean_text import clean_email_text
 from bs4 import BeautifulSoup
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-flow = InstalledAppFlow.from_client_secrets_file(
-    "credentials/gmail_credentials.json",
-    SCOPES
-)
-
-creds = flow.run_local_server(port=0)
-
-from pathlib import Path
+token_path = "credentials/token.json"
+credentials_path = "credentials/gmail_credentials.json"
 
 Path("credentials").mkdir(parents=True, exist_ok=True)
 
-with open("credentials/token.json", "w") as token:
-    token.write(creds.to_json())
+creds = None
+
+if os.path.exists(token_path):
+    creds = Credentials.from_authorized_user_file(
+        token_path,
+        SCOPES
+    )
+
+if creds and creds.expired and creds.refresh_token:
+    creds.refresh(Request())
+
+if not creds or not creds.valid:
+
+    flow = InstalledAppFlow.from_client_secrets_file(
+        credentials_path,
+        SCOPES
+    )
+
+    creds = flow.run_local_server(port=0)
+
+    with open(token_path, "w") as token:
+        token.write(creds.to_json())
 
 service = build("gmail", "v1", credentials=creds)
 
