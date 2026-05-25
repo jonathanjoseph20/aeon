@@ -1,0 +1,71 @@
+name: Daily Intel Digest
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 13 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install google-api-python-client
+          pip install google-auth-httplib2
+          pip install google-auth-oauthlib
+
+      - name: Restore Gmail token
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+        run: |
+          mkdir -p credentials
+          echo "$GMAIL_TOKEN_JSON" > credentials/token.json
+
+      - name: Restore Gmail credentials
+        env:
+          GMAIL_CREDENTIALS_JSON: ${{ secrets.GMAIL_CREDENTIALS_JSON }}
+        run: |
+          echo "$GMAIL_CREDENTIALS_JSON" > credentials/gmail_credentials.json
+
+      - name: Fetch Gmail intake
+        run: |
+          python3 scripts/ingestion/fetch_gmail.py
+
+      - name: Classify intake
+        run: |
+          python3 scripts/ingestion/classify_email.py
+
+      - name: Build digest preview
+        run: |
+          echo "Generated digest:"
+          cat data/processed/daily_digest.md
+
+      - name: Send digest to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "No Slack webhook configured."
+            exit 0
+          fi
+
+          DIGEST="$(cat data/processed/daily_digest.md)"
+
+          jq -n --arg text "$DIGEST" '{text: $text}' > payload.json
+
+          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d @payload.json > /dev/null
