@@ -58,6 +58,10 @@ jobs:
         run: |
           python3 scripts/ingestion/summarize_items.py
 
+      - name: Cluster items
+        run: |
+          python3 scripts/ingestion/cluster_items.py
+
       - name: Build digest file
         run: |
           mkdir -p data/processed
