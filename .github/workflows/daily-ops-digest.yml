@@ -1,0 +1,57 @@
+name: Daily Ops Digest
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 14 * * *"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Build digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "Building daily ops digest for $REPO"
+
+          echo "## Aeon Daily Ops Digest" > digest.md
+          echo "" >> digest.md
+          echo "Repo: $REPO" >> digest.md
+          echo "Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> digest.md
+          echo "" >> digest.md
+
+          echo "### Recent workflow runs" >> digest.md
+          gh run list --repo "$REPO" --limit 10 >> digest.md || true
+          echo "" >> digest.md
+
+          echo "### Recent commits" >> digest.md
+          gh api "repos/$REPO/commits?per_page=5" \
+            --jq '.[] | "- " + .sha[0:7] + " — " + .commit.message' >> digest.md || true
+
+          echo "" >> digest.md
+          echo "### Failed workflow runs" >> digest.md
+          gh run list --repo "$REPO" --status failure --limit 5 >> digest.md || true
+
+          cat digest.md
+
+      - name: Send digest to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "No Slack webhook configured."
+            exit 0
+          fi
+
+          DIGEST="$(cat digest.md)"
+
+          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg text "$DIGEST" '{text: $text}')" > /dev/null
