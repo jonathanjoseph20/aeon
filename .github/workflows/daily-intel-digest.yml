@@ -50,7 +50,7 @@ jobs:
         run: |
           python3 scripts/ingestion/classify_email.py
 
-            - name: Build digest file
+      - name: Build digest file
         run: |
           mkdir -p data/processed
 
@@ -61,37 +61,37 @@ jobs:
 
           if [ -f data/processed/intake_log.jsonl ]; then
             python3 - <<'PY'
-import json
-from collections import defaultdict
-from pathlib import Path
+          import json
+          from collections import defaultdict
+          from pathlib import Path
 
-log_path = Path("data/processed/intake_log.jsonl")
-digest_path = Path("data/processed/daily_digest.md")
+          log_path = Path("data/processed/intake_log.jsonl")
+          digest_path = Path("data/processed/daily_digest.md")
 
-groups = defaultdict(list)
+          groups = defaultdict(list)
 
-for line in log_path.read_text().splitlines():
-    if not line.strip():
-        continue
-    item = json.loads(line)
-    verticals = item.get("verticals") or ["Unclassified"]
-    for vertical in verticals:
-        groups[vertical].append(item)
+          for line in log_path.read_text().splitlines():
+              if not line.strip():
+                  continue
+              item = json.loads(line)
+              verticals = item.get("verticals") or ["Unclassified"]
+              for vertical in verticals:
+                  groups[vertical].append(item)
 
-with digest_path.open("a") as f:
-    if not groups:
-        f.write("No new classified items.\n")
-    for vertical in sorted(groups):
-        f.write(f"## {vertical}\n\n")
-        for item in groups[vertical][:10]:
-            item_id = item.get("id", "unknown")
-            source = item.get("source", "Unknown")
-            subject = item.get("subject", "(no subject)")
-            priority = item.get("priority", "low")
-            preview = item.get("content_preview", "").replace("\n", " ")
-            f.write(f"- `{item_id}` — **{source}** — {subject} — *{priority}* — {preview[:180]}...\n")
-        f.write("\n")
-PY
+          with digest_path.open("a") as f:
+              if not groups:
+                  f.write("No new classified items.\n")
+              for vertical in sorted(groups):
+                  f.write(f"## {vertical}\n\n")
+                  for item in groups[vertical][:10]:
+                      item_id = item.get("id", "unknown")
+                      source = item.get("source", "Unknown")
+                      subject = item.get("subject", "(no subject)")
+                      priority = item.get("priority", "low")
+                      preview = item.get("content_preview", "").replace("\n", " ")
+                      f.write(f"- `{item_id}` — **{source}** — {subject} — *{priority}* — {preview[:180]}...\n")
+                  f.write("\n")
+          PY
           else
             echo "No intake log found." >> data/processed/daily_digest.md
           fi
