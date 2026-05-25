@@ -22,6 +22,11 @@ lines = []
 lines.append("# Daily Intelligence Digest\n")
 
 for vertical, items in sorted(vertical_map.items()):
+    items = sorted(
+        items,
+        key=lambda x: x.get("importance_score", 1),
+        reverse=True
+    )
 
     lines.append(f"\n## {vertical}\n")
 
@@ -32,11 +37,13 @@ for vertical, items in sorted(vertical_map.items()):
         preview = re.sub(r"https?://\S+", "", preview)
         preview = re.sub(r"\s+", " ", preview).strip()
 
-        source = item["source_file"]
+        source = item.get("source_name") or item["source_file"]
+        subject = item.get("subject", "")
+        priority = item.get("priority", "low")
         item_id = item.get("item_id", "no-id")
 
         lines.append(
-            f"- `{item_id}` — **{source}** — {preview[:180]}..."
+            f"- `{item_id}` — **{source}** — {subject} — *{priority}* — {preview[:180]}..."
         )
 
 digest = "\n".join(lines)
