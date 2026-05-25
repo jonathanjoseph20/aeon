@@ -57,3 +57,4 @@ credentials/
 data/intake/email/
 data/processed/
 data/credentials/token.json
+data/metadata/source_candidates.jsonl
