@@ -84,8 +84,8 @@ jobs:
               for vertical in sorted(groups):
                   f.write(f"## {vertical}\n\n")
                   for item in groups[vertical][:10]:
-                      item_id = item.get("id", "unknown")
-                      source = item.get("source", "Unknown")
+                      item_id = item.get("id") or item.get("item_id") or item.get("hash") or "unknown"
+                      source = item.get("source") or item.get("source_name") or "Unknown"
                       subject = item.get("subject", "(no subject)")
                       priority = item.get("priority", "low")
                       preview = item.get("content_preview", "").replace("\n", " ")
