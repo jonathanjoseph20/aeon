@@ -19,6 +19,13 @@ flow = InstalledAppFlow.from_client_secrets_file(
 
 creds = flow.run_local_server(port=0)
 
+from pathlib import Path
+
+Path("credentials").mkdir(parents=True, exist_ok=True)
+
+with open("credentials/token.json", "w") as token:
+    token.write(creds.to_json())
+
 service = build("gmail", "v1", credentials=creds)
 
 with open("data/metadata/email_sources.json", "r") as f:

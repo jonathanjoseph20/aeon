@@ -56,4 +56,4 @@ memory/executions.jsonl
 credentials/
 data/intake/email/
 data/processed/
-data/
+data/credentials/token.json
