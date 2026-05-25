@@ -5,18 +5,34 @@
     "priority": "medium",
     "importance_score": 6
   },
-
   "banklesshq.com": {
     "name": "Bankless",
     "default_verticals": ["DeFi"],
     "priority": "high",
     "importance_score": 8
   },
-
   "venice.ai": {
     "name": "Venice",
     "default_verticals": ["AI", "Portfolio"],
     "priority": "high",
     "importance_score": 9
+  },
+  "therollup.co": {
+    "name": "The Rollup",
+    "default_verticals": ["DeFi"],
+    "priority": "medium",
+    "importance_score": 6
+  },
+  "tokenizedassetcoalition.com": {
+    "name": "Tokenized Asset Coalition",
+    "default_verticals": ["RWA"],
+    "priority": "medium",
+    "importance_score": 7
+  },
+  "peterattiamd.com": {
+    "name": "Peter Attia",
+    "default_verticals": ["Personal"],
+    "priority": "low",
+    "importance_score": 3
   }
 }
