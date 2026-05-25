@@ -52,3 +52,7 @@ node_modules/
 
 memory/token-usage.jsonl
 memory/executions.jsonl
+
+credentials/
+data/intake/email/
+data/processed/

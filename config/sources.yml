@@ -1,0 +1,26 @@
+twitter:
+  - handle: aaronjmars
+    verticals:
+      - AI
+      - Agents
+    priority: high
+
+  - handle: VeniceAILabs
+    verticals:
+      - AI
+      - DeFi
+    priority: high
+
+newsletters:
+  - name: Bankless
+    verticals:
+      - DeFi
+    gmail_label: Research/DeFi
+    priority: high
+
+  - name: The Rollup
+    verticals:
+      - RWA
+      - AI
+    gmail_label: Research/RWA
+    priority: high
