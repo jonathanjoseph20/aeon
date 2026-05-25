@@ -3,7 +3,10 @@ name: Failure Alert
 on:
   workflow_run:
     workflows:
-      - "*"
+      - "Message Worker"
+      - "Messages & Scheduler"
+      - "Daily Ops Digest"
+      - "Daily Intel Digest"
     types:
       - completed
 
