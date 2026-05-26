@@ -2,8 +2,13 @@ import argparse
 import hashlib
 import json
 import sys
+import re
 from datetime import datetime, UTC
 from pathlib import Path
+from html import unescape
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+from xml.etree import ElementTree as ET
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -25,6 +30,11 @@ def safe_int(value, default=1):
         return default
 
 
+def compute_dedupe_hash(text):
+    normalized_content = str(text or "").lower().strip()
+    return hashlib.sha256(normalized_content.encode("utf-8")).hexdigest()[:16]
+
+
 def normalize_handle(value):
     return str(value or "").strip().lstrip("@").lower()
 
@@ -43,12 +53,16 @@ def collect_inputs(inputs):
     return files
 
 
-def load_twitter_sources():
-    config = load_yaml(Path("config/sources.yml"))
+def load_twitter_sources(sources_path=Path("config/sources.yml")):
+    config = load_yaml(Path(sources_path))
     registry = {}
 
     for entry in config.get("twitter", []) or []:
         handle = normalize_handle(entry.get("handle"))
+        feed_urls = entry.get("feed_url") or entry.get("feed_urls") or []
+
+        if isinstance(feed_urls, str):
+            feed_urls = [feed_urls]
 
         if not handle:
             continue
@@ -57,10 +71,145 @@ def load_twitter_sources():
             "name": entry.get("name") or entry.get("handle") or "Unknown",
             "priority": entry.get("priority", "low"),
             "importance_score": safe_int(entry.get("importance_score", 1)),
-            "verticals": entry.get("verticals", []) or []
+            "verticals": entry.get("verticals", []) or [],
+            "feed_urls": [str(url).strip() for url in feed_urls if str(url).strip()]
         }
 
     return registry
+
+
+def local_name(tag):
+    return str(tag or "").rsplit("}", 1)[-1].lower()
+
+
+def clean_text(value):
+    text = unescape(str(value or ""))
+    text = text.replace("\xa0", " ")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def first_xml_text(element, names):
+    for node in element.iter():
+        if local_name(node.tag) in names:
+            text = clean_text("".join(node.itertext()))
+            if text:
+                return text
+
+    return ""
+
+
+def first_atom_link(entry):
+    for node in entry.iter():
+        if local_name(node.tag) != "link":
+            continue
+
+        href = str(node.attrib.get("href", "") or "").strip()
+
+        if not href:
+            continue
+
+        rel = str(node.attrib.get("rel", "") or "").strip().lower()
+
+        if rel in ("", "alternate"):
+            return href
+
+    for node in entry.iter():
+        if local_name(node.tag) == "link":
+            href = str(node.attrib.get("href", "") or "").strip()
+            if href:
+                return href
+
+    return ""
+
+
+def extract_feed_items(feed_xml, feed_url):
+    root = ET.fromstring(feed_xml)
+    root_name = local_name(root.tag)
+    items = []
+
+    if root_name == "feed":
+        entry_nodes = [node for node in root.iter() if local_name(node.tag) == "entry"]
+
+        for entry in entry_nodes:
+            title = first_xml_text(entry, ["title"])
+            summary = first_xml_text(entry, ["summary"])
+            content = first_xml_text(entry, ["content"])
+            link = first_atom_link(entry)
+            published = first_xml_text(entry, ["published", "updated"])
+            item_id = first_xml_text(entry, ["id"]) or link or title or feed_url
+            text = max((title, summary, content), key=len, default="")
+            text = clean_text(text or title or summary or content)
+
+            items.append(
+                {
+                    "id": item_id,
+                    "tweet_id": item_id,
+                    "status_id": item_id,
+                    "id_str": item_id,
+                    "text": text,
+                    "full_text": text,
+                    "content": text,
+                    "body": text,
+                    "tweet_text": text,
+                    "message": text,
+                    "url": link or feed_url,
+                    "tweet_url": link or feed_url,
+                    "source_url": link or feed_url,
+                    "created_at": published,
+                    "posted_at": published,
+                    "timestamp": published
+                }
+            )
+
+        return items
+
+    item_nodes = [node for node in root.iter() if local_name(node.tag) == "item"]
+
+    for item in item_nodes:
+        title = first_xml_text(item, ["title"])
+        description = first_xml_text(item, ["description", "encoded", "summary", "content"])
+        link = first_xml_text(item, ["link"])
+        published = first_xml_text(item, ["pubdate", "published", "updated", "date"])
+        item_id = first_xml_text(item, ["guid", "id"]) or link or title or feed_url
+        text = max((title, description), key=len, default="")
+        text = clean_text(text or title or description)
+
+        items.append(
+            {
+                "id": item_id,
+                "tweet_id": item_id,
+                "status_id": item_id,
+                "id_str": item_id,
+                "text": text,
+                "full_text": text,
+                "content": text,
+                "body": text,
+                "tweet_text": text,
+                "message": text,
+                "url": link or feed_url,
+                "tweet_url": link or feed_url,
+                "source_url": link or feed_url,
+                "created_at": published,
+                "posted_at": published,
+                "timestamp": published
+            }
+        )
+
+    return items
+
+
+def fetch_feed_xml(feed_url, timeout=20):
+    request = Request(
+        feed_url,
+        headers={
+            "User-Agent": "AEON feed ingestion/1.0"
+        }
+    )
+
+    with urlopen(request, timeout=timeout) as response:
+        return response.read().decode(response.headers.get_content_charset() or "utf-8", errors="replace")
 
 
 def get_first(record, keys):
@@ -85,6 +234,7 @@ def extract_handle(record):
     return get_first(
         record,
         [
+            "source_handle",
             "author_handle",
             "handle",
             "username",
@@ -132,18 +282,16 @@ def build_record(raw_record, source_file, twitter_sources):
     verticals = raw_record.get("verticals") or source_meta.get("verticals", [])
     subject = raw_record.get("subject") or text[:120]
     source_url = get_first(raw_record, ["url", "tweet_url", "source_url"])
+    source_file_value = raw_record.get("source_file") or str(source_file)
 
     if not source_url and handle and tweet_id:
         source_url = f"https://x.com/{handle}/status/{tweet_id}"
 
-    normalized_content = text.lower().strip()
-    dedupe_hash = hashlib.sha256(
-        normalized_content.encode("utf-8")
-    ).hexdigest()[:16]
+    dedupe_hash = compute_dedupe_hash(text)
 
     return {
         "source_type": "twitter",
-        "source_file": str(Path(source_file).resolve()),
+        "source_file": str(source_file_value),
         "source_id": tweet_id or source_url or handle or source_file,
         "source_name": source_name,
         "source_handle": handle,
@@ -164,13 +312,81 @@ def build_record(raw_record, source_file, twitter_sources):
     }
 
 
+def normalize_feed_record(feed_record, feed_url, handle, source_meta):
+    handle = normalize_handle(handle)
+    text = str(feed_record.get("text") or "").strip()
+
+    if not text:
+        return None
+
+    return {
+        "source_handle": handle,
+        "source_name": feed_record.get("source_name") or source_meta.get("name") or handle or feed_url,
+        "priority": feed_record.get("priority") or source_meta.get("priority", "low"),
+        "importance_score": safe_int(
+            feed_record.get("importance_score"),
+            source_meta.get("importance_score", 1)
+        ),
+        "verticals": feed_record.get("verticals") or source_meta.get("verticals", []),
+        "source_file": feed_url,
+        "source_url": feed_record.get("source_url") or feed_url,
+        "source_domain": "x.com" if handle else "",
+        "known_source": "True" if source_meta else "False",
+        "subject": feed_record.get("subject") or text[:120],
+        "text": text,
+        "full_text": text,
+        "content": text,
+        "body": text,
+        "tweet_text": text,
+        "message": text,
+        "url": feed_record.get("url") or feed_record.get("source_url") or feed_url,
+        "tweet_url": feed_record.get("tweet_url") or feed_record.get("source_url") or feed_url,
+        "created_at": feed_record.get("created_at") or feed_record.get("posted_at") or feed_record.get("timestamp"),
+        "tweet_id": feed_record.get("tweet_id") or feed_record.get("id") or feed_record.get("id_str") or feed_record.get("source_url") or feed_url,
+        "status_id": feed_record.get("status_id") or feed_record.get("tweet_id") or feed_record.get("id") or feed_record.get("source_url") or feed_url,
+        "id": feed_record.get("id") or feed_record.get("tweet_id") or feed_record.get("status_id") or feed_record.get("source_url") or feed_url,
+        "id_str": feed_record.get("id_str") or feed_record.get("id") or feed_record.get("tweet_id") or feed_record.get("source_url") or feed_url
+    }
+
+
+def build_feed_records(feed_url, handle, source_meta, twitter_sources):
+    feed_xml = fetch_feed_xml(feed_url)
+    parsed_records = extract_feed_items(feed_xml, feed_url)
+    records = []
+
+    for parsed_record in parsed_records:
+        record = normalize_feed_record(parsed_record, feed_url, handle, source_meta)
+
+        if not record:
+            continue
+
+        built = build_record(record, feed_url, twitter_sources)
+
+        if built:
+            records.append(built)
+
+    return records
+
+
+def safe_file_stem(value):
+    cleaned = re.sub(r"[^a-z0-9._-]+", "-", normalize_handle(value) or str(value or "").lower().strip())
+    cleaned = cleaned.strip("-._")
+    return cleaned or "twitter"
+
+
+def write_records(output_path, records):
+    with Path(output_path).open("w") as f:
+        for record in records:
+            f.write(json.dumps(record) + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Normalize manual Twitter JSONL exports into AEON intake records."
+        description="Normalize manual Twitter JSONL exports and configured RSS/Atom feeds into AEON intake records."
     )
     parser.add_argument(
         "inputs",
-        nargs="+",
+        nargs="*",
         help="One or more JSONL files or directories containing JSONL files."
     )
     parser.add_argument(
@@ -194,18 +410,28 @@ def main():
         default=1,
         help="Fallback importance score when the source is not configured."
     )
+    parser.add_argument(
+        "--sources-file",
+        default="config/sources.yml",
+        help="YAML file containing Twitter/X source metadata and optional feed URLs."
+    )
+    parser.add_argument(
+        "--feeds",
+        action="store_true",
+        help="Fetch configured RSS/Atom feed URLs from config/sources.yml."
+    )
 
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    twitter_sources = load_twitter_sources()
+    twitter_sources = load_twitter_sources(args.sources_file)
     input_files = collect_inputs(args.inputs)
+    wrote_anything = False
 
-    if not input_files:
-        print("No Twitter JSONL files found.")
-        raise SystemExit(0)
+    if not input_files and not args.feeds:
+        parser.error("provide one or more JSONL inputs, or pass --feeds")
 
     for input_file in input_files:
         records = []
@@ -245,11 +471,48 @@ def main():
         )
         output_path = output_dir / output_name
 
-        with output_path.open("w") as f:
-            for record in records:
-                f.write(json.dumps(record) + "\n")
+        write_records(output_path, records)
 
         print(f"Wrote: {output_path}")
+        wrote_anything = True
+
+    if args.feeds:
+        configured_feeds = []
+
+        for handle, meta in twitter_sources.items():
+            for feed_url in meta.get("feed_urls", []):
+                configured_feeds.append((handle, feed_url, meta))
+
+        configured_feeds.sort(key=lambda item: (item[0], item[1]))
+
+        if not configured_feeds:
+            print("No Twitter feed URLs were configured.")
+        else:
+            for handle, feed_url, meta in configured_feeds:
+                try:
+                    records = build_feed_records(feed_url, handle, meta, twitter_sources)
+                except (HTTPError, URLError, ET.ParseError, ValueError) as exc:
+                    print(f"Skipped feed for {handle or feed_url}: {exc}")
+                    continue
+
+                if not records:
+                    print(f"Skipped empty feed: {feed_url}")
+                    continue
+
+                output_name = (
+                    f"{safe_file_stem(handle)}-feed-"
+                    f"{hashlib.sha256(feed_url.encode('utf-8')).hexdigest()[:10]}-"
+                    f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}.jsonl"
+                )
+                output_path = output_dir / output_name
+
+                write_records(output_path, records)
+
+                print(f"Wrote: {output_path} ({len(records)} items from {handle})")
+                wrote_anything = True
+
+    if not wrote_anything:
+        print("No Twitter items were written.")
 
 
 if __name__ == "__main__":

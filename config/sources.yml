@@ -1,3 +1,6 @@
+# Optional per-account field:
+#   feed_url: RSS or Atom feed URL for low-cost feed-based ingestion.
+
 twitter:
   - handle: aaronjmars
     name: Aaron J. Mars
