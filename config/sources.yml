@@ -6,39 +6,660 @@
 # Legacy optional fields such as `importance_score` are still honored.
 
 sources:
-  - source_name: Aaron J. Mars
+  - source_name: Mikelppolito_
     source_type: twitter
-    handle: aaronjmars
-    feed_url: https://example.com/feeds/aaronjmars.xml
-    priority: high
-    default_verticals:
-      - AI
-      - Agents
-    watchlist_boost: 1
-    promotion_threshold_override: 6
-    digest_enabled: true
-    alert_enabled: true
-    importance_score: 6
-
-  - source_name: Bankless
-    source_type: newsletter
-    gmail_label: Research/DeFi
-    source_domain: banklesshq.com
-    priority: high
-    default_verticals:
-      - DeFi
-    watchlist_boost: 2
-    promotion_threshold_override: 7
-    digest_enabled: true
-    alert_enabled: true
-    importance_score: 8
-
-  - source_name: Macro PDF Brief
-    source_type: pdf
     priority: medium
-    default_verticals:
-      - Macro
-    watchlist_boost: 1
-    promotion_threshold_override: 5
-    digest_enabled: false
-    alert_enabled: false
+    default_verticals: [Media, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/Mikelppolito_
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: rektdiomedes
+    source_type: twitter
+    priority: medium
+    default_verticals: [Macro, Crypto, Media]
+    watchlist_boost: 
+    feed_url: https://x.com/rektdiomedes
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: lordjorx
+    source_type: twitter
+    priority: medium
+    default_verticals: [DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/lordjorx
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: a1research__
+    source_type: twitter
+    priority: high
+    default_verticals: [Research, Data]
+    watchlist_boost: 
+    feed_url: https://x.com/a1research__
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: 0xSammy
+    source_type: twitter
+    priority: high
+    default_verticals: [Research, AI]
+    watchlist_boost: 
+    feed_url: https://x.com/0xSammy
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: 40acres_Finance
+    source_type: twitter
+    priority: high
+    default_verticals: [RWA, DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/40acres_Finance
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: intocryptotoast
+    source_type: twitter
+    priority: 
+    default_verticals: [DeFi, NFT, Ethereum]
+    watchlist_boost: 
+    feed_url: https://x.com/intocryptotoast
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: redphone
+    source_type: twitter
+    priority: medium
+    default_verticals: [VC, Marketing, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/redphone
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: n2ckchong
+    source_type: twitter
+    priority: 
+    default_verticals: [DeFi, VC]
+    watchlist_boost: 
+    feed_url: https://x.com/n2ckchong
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: arthur0x
+    source_type: twitter
+    priority: medium
+    default_verticals: [VC, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/arthur0x
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: thedailygwei
+    source_type: twitter
+    priority: 
+    default_verticals: [Ethereum, Education, Media]
+    watchlist_boost: 
+    feed_url: https://x.com/thedailygwei
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: AustinBarack
+    source_type: twitter
+    priority: medium
+    default_verticals: [VC, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/AustinBarack
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: Rationalape1
+    source_type: twitter
+    priority: medium
+    default_verticals: [DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/Rationalape1
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: kaiynne
+    source_type: twitter
+    priority: medium
+    default_verticals: [DeFi, VC, Infrastructure]
+    watchlist_boost: 
+    feed_url: https://x.com/kaiynne
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: lawmaster
+    source_type: twitter
+    priority: medium
+    default_verticals: [Media, Data, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/lawmaster
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: ASvanevik
+    source_type: twitter
+    priority: medium
+    default_verticals: [Data, Analytics, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/ASvanevik
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: blocmates
+    source_type: twitter
+    priority: medium
+    default_verticals: [Media, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/blocmates
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: JackNiewold
+    source_type: twitter
+    priority: medium
+    default_verticals: [Media, Research, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/JackNiewold
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: DefiIgnas
+    source_type: twitter
+    priority: medium
+    default_verticals: [DeFi, Research]
+    watchlist_boost: 
+    feed_url: https://x.com/DefiIgnas
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: crypto_condom
+    source_type: twitter
+    priority: medium
+    default_verticals: [Crypto, DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/crypto_condom
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: ViktorDefi
+    source_type: twitter
+    priority: medium
+    default_verticals: [DeFi, Research]
+    watchlist_boost: 
+    feed_url: https://x.com/ViktorDefi
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: DeFiMinty
+    source_type: twitter
+    priority: high
+    default_verticals: [Research, DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/DeFiMinty
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: 0xTindorr
+    source_type: twitter
+    priority: high
+    default_verticals: [Crypto, DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/0xTindorr
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: Louround_
+    source_type: twitter
+    priority: high
+    default_verticals: [Research, DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/Louround_
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: defi_mochi
+    source_type: twitter
+    priority: medium
+    default_verticals: [Data, DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/defi_mochi
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: thelearningpill
+    source_type: twitter
+    priority: 
+    default_verticals: [Research, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/thelearningpill
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: hooeem
+    source_type: twitter
+    priority: medium
+    default_verticals: [Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/hooeem
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: elonmusk
+    source_type: twitter
+    priority: low
+    default_verticals: [Tech, Macro, AI]
+    watchlist_boost: 
+    feed_url: https://x.com/elonmusk
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: dcfgod
+    source_type: twitter
+    priority: high
+    default_verticals: [Crypto, Trading]
+    watchlist_boost: 
+    feed_url: https://x.com/dcfgod
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: DCinvestor
+    source_type: twitter
+    priority: medium
+    default_verticals: [Ethereum, NFT, AI, Macro]
+    watchlist_boost: 
+    feed_url: https://x.com/DCinvestor
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: thedefiedge
+    source_type: twitter
+    priority: medium
+    default_verticals: [DeFi, Research, Education]
+    watchlist_boost: 
+    feed_url: https://x.com/thedefiedge
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: 0xAero8
+    source_type: twitter
+    priority: high
+    default_verticals: [Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/0xAero8
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: EthWolfran
+    source_type: twitter
+    priority: medium
+    default_verticals: [DeFi, Data]
+    watchlist_boost: 
+    feed_url: https://x.com/EthWolfran
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: ehwwpk
+    source_type: twitter
+    priority: 
+    default_verticals: [Stablecoins, DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/ehwwpk
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: boredGenius
+    source_type: twitter
+    priority: 
+    default_verticals: [Privacy, Infrastructure, DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/boredGenius
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: 0xngmi
+    source_type: twitter
+    priority: high
+    default_verticals: [DeFi, Data, Developer]
+    watchlist_boost: 
+    feed_url: https://x.com/0xngmi
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: rektfencer
+    source_type: twitter
+    priority: high
+    default_verticals: [DeFi, Trading, DAO]
+    watchlist_boost: 
+    feed_url: https://x.com/rektfencer
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: lex_node
+    source_type: twitter
+    priority: high
+    default_verticals: [Legal, RWA, Infrastructure]
+    watchlist_boost: 
+    feed_url: https://x.com/lex_node
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: 0xSisyphus
+    source_type: twitter
+    priority: high
+    default_verticals: [Crypto, DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/0xSisyphus
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: jbrukh
+    source_type: twitter
+    priority: high
+    default_verticals: [VC, Infrastructure, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/jbrukh
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: AviFelman
+    source_type: twitter
+    priority: high
+    default_verticals: [Trading, Media, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/AviFelman
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: RyanWatkins_
+    source_type: twitter
+    priority: medium
+    default_verticals: [VC, Research, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/RyanWatkins_
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: lookonchain
+    source_type: twitter
+    priority: high
+    default_verticals: [Data, Analytics, Trading]
+    watchlist_boost: 
+    feed_url: https://x.com/lookonchain
+    digest_enabled: 
+    alert_enabled:
+
+    sources:
+  - source_name: sjdedic
+    source_type: twitter
+    priority: high
+    default_verticals: [VC, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/sjdedic
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: hasufl
+    source_type: twitter
+    priority: medium
+    default_verticals: [MEV, Infrastructure, DeFi]
+    watchlist_boost: 
+    feed_url: https://x.com/hasufl
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: hosseeb
+    source_type: twitter
+    priority: high
+    default_verticals: [VC, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/hosseeb
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: dan_pantera
+    source_type: twitter
+    priority: high
+    default_verticals: [VC, Macro, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/dan_pantera
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: 0xThoor
+    source_type: twitter
+    priority: high
+    default_verticals: [DeFi, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/0xThoor
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: pythianism
+    source_type: twitter
+    priority: medium
+    default_verticals: [VC, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/pythianism
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: Slappjakke
+    source_type: twitter
+    priority: medium
+    default_verticals: [DeFi, DeFAI, Layer2]
+    watchlist_boost: 
+    feed_url: https://x.com/Slappjakke
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: fintechfrank
+    source_type: twitter
+    priority: medium
+    default_verticals: [Media, Trading, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/fintechfrank
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: sassal0x
+    source_type: twitter
+    priority: low
+    default_verticals: [Ethereum, Education]
+    watchlist_boost: 
+    feed_url: https://x.com/sassal0x
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: FrankieIsLost
+    source_type: twitter
+    priority: 
+    default_verticals: [VC, AI, Robotics, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/FrankieIsLost
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: patfscott
+    source_type: twitter
+    priority: high
+    default_verticals: [DeFi, Data]
+    watchlist_boost: 
+    feed_url: https://x.com/patfscott
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: Shaughnessy119
+    source_type: twitter
+    priority: medium
+    default_verticals: [VC, Research, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/Shaughnessy119
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: tomhschmidt
+    source_type: twitter
+    priority: high
+    default_verticals: [VC, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/tomhschmidt
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: veradittakit
+    source_type: twitter
+    priority: high
+    default_verticals: [VC, Infrastructure, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/veradittakit
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: richardchen33
+    source_type: twitter
+    priority: high
+    default_verticals: [VC, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/richardchen33
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: _charlienoyes
+    source_type: twitter
+    priority: high
+    default_verticals: [VC, Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/_charlienoyes
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: kermankohli
+    source_type: twitter
+    priority: medium
+    default_verticals: [AI, Semiconductors, Research]
+    watchlist_boost: 
+    feed_url: https://x.com/kermankohli
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: will__price
+    source_type: twitter
+    priority: medium
+    default_verticals: [Crypto]
+    watchlist_boost: 
+    feed_url: https://x.com/will__price
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: lisajytan
+    source_type: twitter
+    priority: high
+    default_verticals: [Tokenomics, Research]
+    watchlist_boost: 
+    feed_url: https://x.com/lisajytan
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: vasily_sumanov
+    source_type: twitter
+    priority: medium
+    default_verticals: [AI, Valuation, Data]
+    watchlist_boost: 
+    feed_url: https://x.com/vasily_sumanov
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: 0xcarlosg
+    source_type: twitter
+    priority: 
+    default_verticals: [Research, Media]
+    watchlist_boost: 
+    feed_url: https://x.com/0xcarlosg
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: tarunchitra
+    source_type: twitter
+    priority: 
+    default_verticals: [DeFi, Risk Management, VC]
+    watchlist_boost: 
+    feed_url: https://x.com/tarunchitra
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: TheChicagoVC
+    source_type: twitter
+    priority: medium
+    default_verticals: [Stablecoins, Fintech]
+    watchlist_boost: 
+    feed_url: https://x.com/TheChicagoVC
+    digest_enabled: 
+    alert_enabled:
+    sources:
+  - source_name: The Rollup
+    source_type: newsletter
+    priority: 
+    default_verticals: [DeFi]
+    gmail_label: Research/DeFi
+    watchlist_boost: 
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: The Defiant
+    source_type: newsletter
+    priority: 
+    default_verticals: [DeFi]
+    gmail_label: Research/DeFi
+    watchlist_boost: 
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: Ben's Bites
+    source_type: newsletter
+    priority: 
+    default_verticals: [AI]
+    gmail_label: Research/AI
+    watchlist_boost: 
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: Pitchbook News
+    source_type: newsletter
+    priority: 
+    default_verticals: [Private Markets, Macro]
+    gmail_label: Research/Private_Markets
+    watchlist_boost: 
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: Sacra
+    source_type: newsletter
+    priority: 
+    default_verticals: [Private Markets]
+    gmail_label: Research/Private_Markets
+    watchlist_boost: 
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: Alt Goes Mainstream
+    source_type: newsletter
+    priority: 
+    default_verticals: [Private Markets]
+    gmail_label: Research/Private_Markets
+    watchlist_boost: 
+    digest_enabled: 
+    alert_enabled: 
+
+  - source_name: Tokenized Asset Coalition
+    source_type: newsletter
+    priority: 
+    default_verticals: [RWA, Tokenization]
+    gmail_label: Research/RWA_Tokenization
+    watchlist_boost: 
+    digest_enabled: 
+    alert_enabled:
