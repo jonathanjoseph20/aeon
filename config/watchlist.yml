@@ -1,0 +1,25 @@
+entities:
+  Venice:
+    keywords: ["venice", "vvv", "diem"]
+    verticals: ["AI", "Portfolio"]
+    score_boost: 6
+
+  Dolphin:
+    keywords: ["dolphin", "$POD", "xPOD", "Dolphin AI"]
+    verticals: ["AI", "Portfolio"]
+    score_boost: 6
+
+  Base:
+    keywords: ["base", "coinbase"]
+    verticals: ["DeFi", "Portfolio"]
+    score_boost: 4
+
+  RWA:
+    keywords: ["tokenization", "rwa", "real world assets", "private credit", "stablecoin"]
+    verticals: ["RWA"]
+    score_boost: 5
+
+  OpenRouter:
+    keywords: ["openrouter", "model routing", "inference"]
+    verticals: ["AI"]
+    score_boost: 5

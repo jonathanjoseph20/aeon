@@ -29,6 +29,13 @@ GMAIL_LABEL_VERTICAL_PRIORS = {
 with open("config/verticals.yml", "r") as f:
     verticals = yaml.safe_load(f)
 
+watchlist_path = Path("config/watchlist.yml")
+if watchlist_path.exists():
+    with watchlist_path.open("r") as f:
+        watchlist = yaml.safe_load(f) or {}
+else:
+    watchlist = {}
+
 email_folder = Path("data/intake/email")
 log_path = Path("data/processed/intake_log.jsonl")
 
@@ -105,6 +112,7 @@ for email_path in files:
 
     content = " ".join(body_lines).strip()
     normalized = content.lower()
+    searchable_text = f"{metadata['subject']} {content}".lower()
 
     item_id = hashlib.sha256(
         normalized.encode("utf-8")
@@ -126,7 +134,6 @@ for email_path in files:
 
         scores[vertical] = score
 
-    # Add Gmail label priors.
     label_verticals = GMAIL_LABEL_VERTICAL_PRIORS.get(
         metadata["gmail_label"],
         []
@@ -135,10 +142,41 @@ for email_path in files:
     for vertical in label_verticals:
         scores[vertical] = scores.get(vertical, 0) + 3
 
-    # Known high-importance sources get a small confidence boost.
     if metadata["known_source"] == "True":
         for vertical in label_verticals:
             scores[vertical] = scores.get(vertical, 0) + 1
+
+    watchlist_hits = []
+
+    for entity_name, entity_data in watchlist.get("entities", {}).items():
+
+        keywords = entity_data.get("keywords", [])
+        entity_verticals = entity_data.get("verticals", [])
+        score_boost = int(entity_data.get("score_boost", 0))
+
+        matched_keywords = [
+            keyword for keyword in keywords
+            if keyword.lower() in searchable_text
+        ]
+
+        if not matched_keywords:
+            continue
+
+        watchlist_hits.append({
+            "entity": entity_name,
+            "matched_keywords": matched_keywords,
+            "score_boost": score_boost
+        })
+
+        for vertical in entity_verticals:
+            scores[vertical] = scores.get(vertical, 0) + score_boost
+
+        metadata["importance_score"] += score_boost
+
+        if metadata["importance_score"] >= 8:
+            metadata["priority"] = "high"
+        elif metadata["importance_score"] >= 4:
+            metadata["priority"] = "medium"
 
     matched_verticals = [
         vertical for vertical, score in scores.items()
@@ -160,6 +198,7 @@ for email_path in files:
         "gmail_label": metadata["gmail_label"],
         "verticals": matched_verticals,
         "scores": scores,
+        "watchlist_hits": watchlist_hits,
         "content_preview": content[:200]
     }
 
