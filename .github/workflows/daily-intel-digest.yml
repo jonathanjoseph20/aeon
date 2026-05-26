@@ -76,3 +76,15 @@ jobs:
           else
             echo "No Slack payload was generated."
           fi
+
+      - name: Send Slack outbox
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python3 scripts/ingestion/send_slack_outbox.py
+
+      - name: Skip Slack delivery
+        if: ${{ secrets.SLACK_WEBHOOK_URL == '' }}
+        run: |
+          echo "No Slack webhook configured; skipping Slack delivery."

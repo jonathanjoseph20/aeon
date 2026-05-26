@@ -40,6 +40,16 @@ To inspect the payload without writing the artifact, run:
 python3 scripts/ingestion/build_slack_digest_payload.py --preview
 ```
 
+To send the latest outbox payload to Slack, run:
+
+```bash
+python3 scripts/ingestion/send_slack_outbox.py --preview
+python3 scripts/ingestion/send_slack_outbox.py
+python3 scripts/ingestion/send_slack_outbox.py --date 2026-05-25
+```
+
+The sender is separate from payload generation. It only posts when `SLACK_WEBHOOK_URL` is set, and it logs a warning instead of failing the pipeline if Slack delivery fails.
+
 Raw intake data stays out of git because the intake folders are ignored.
 
 ## GitHub Actions
@@ -53,5 +63,4 @@ It supports both:
 
 The workflow restores Gmail secrets when they are provided, then runs the same local pipeline script. Twitter feed failures are logged by the ingestion script and do not fail the job.
 
-The workflow does not call Hermes APIs and does not post to Slack directly.
-It does produce the Slack-safe outbox payload artifact so it can be inspected or forwarded later by an operator.
+The workflow does not call Hermes APIs. It produces the Slack-safe outbox payload artifact and, when `SLACK_WEBHOOK_URL` is configured, forwards that outbox to Slack with the separate sender utility.
