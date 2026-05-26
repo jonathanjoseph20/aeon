@@ -1,6 +1,7 @@
 import hashlib
 import json
 import sys
+import re
 from datetime import datetime, UTC
 from email.utils import parseaddr
 from pathlib import Path
@@ -127,6 +128,82 @@ def load_watchlist():
         return {}
 
     return load_yaml(path)
+
+
+def normalize_match_values(value):
+    if value in (None, ""):
+        return []
+
+    if isinstance(value, str):
+        values = [value]
+    else:
+        values = list(value)
+
+    normalized = []
+    seen = set()
+
+    for entry in values:
+        text = str(entry or "").strip()
+
+        if not text or text in seen:
+            continue
+
+        seen.add(text)
+        normalized.append(text)
+
+    return normalized
+
+
+def compile_watchlist_pattern(term, match_type):
+    text = str(term or "").strip()
+
+    if not text:
+        return None
+
+    if match_type == "regex":
+        try:
+            return re.compile(text, re.IGNORECASE)
+        except re.error:
+            return None
+
+    if match_type == "phrase":
+        pieces = [re.escape(piece) for piece in re.split(r"\s+", text) if piece]
+
+        if not pieces:
+            return None
+
+        pattern = r"(?<!\w)" + r"\s+".join(pieces) + r"(?!\w)"
+        return re.compile(pattern, re.IGNORECASE)
+
+    escaped = re.escape(text)
+    return re.compile(rf"(?<!\w){escaped}(?!\w)", re.IGNORECASE)
+
+
+def match_watchlist_terms(searchable_text, entity_data):
+    matches = []
+    explicit_match_types = (
+        ("phrase_match", "phrase"),
+        ("token_match", "token"),
+        ("regex_match", "regex"),
+    )
+
+    for field_name, match_type in explicit_match_types:
+        for term in normalize_match_values(entity_data.get(field_name)):
+            pattern = compile_watchlist_pattern(term, match_type)
+
+            if pattern and pattern.search(searchable_text):
+                matches.append(term)
+
+    if matches:
+        return matches
+
+    for term in normalize_match_values(entity_data.get("keywords")):
+        pattern = compile_watchlist_pattern(term, "token")
+
+        if pattern and pattern.search(searchable_text):
+            matches.append(term)
+
+    return matches
 
 
 def existing_hashes(log_path):
@@ -417,7 +494,7 @@ def classify_item(
         return None
 
     normalized_content = content.lower().strip()
-    searchable_text = f"{subject} {content}".lower()
+    searchable_text = f"{subject} {content}"
 
     item_id = hashlib.sha256(
         normalized_content.encode("utf-8")
@@ -454,14 +531,9 @@ def classify_item(
     watchlist_hits = []
 
     for entity_name, entity_data in watchlist.get("entities", {}).items():
-        keywords = entity_data.get("keywords", []) or []
         entity_verticals = entity_data.get("verticals", []) or []
         score_boost = safe_int(entity_data.get("score_boost", 0), 0)
-
-        matched_keywords = [
-            keyword for keyword in keywords
-            if str(keyword).lower() in searchable_text
-        ]
+        matched_keywords = match_watchlist_terms(searchable_text, entity_data)
 
         if not matched_keywords:
             continue

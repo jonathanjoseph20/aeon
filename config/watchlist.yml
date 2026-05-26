@@ -1,25 +1,31 @@
 entities:
   Venice:
-    keywords: ["venice", "vvv", "diem"]
+    token_match: ["venice", "vvv", "diem"]
     verticals: ["AI", "Portfolio"]
     score_boost: 6
 
   Dolphin:
-    keywords: ["dolphin", "$POD", "xPOD", "Dolphin AI"]
+    token_match: ["dolphin", "$POD", "xPOD"]
+    phrase_match: ["Dolphin AI"]
     verticals: ["AI", "Portfolio"]
     score_boost: 6
 
   Base:
-    keywords: ["base", "coinbase"]
+    token_match: ["coinbase"]
+    phrase_match: ["Base ecosystem", "Base chain", "Base app"]
+    regex_match: ["\\bBase\\b\\s+(?:ecosystem|chain|app|mainnet|network)"]
     verticals: ["DeFi", "Portfolio"]
     score_boost: 4
 
   RWA:
-    keywords: ["tokenization", "rwa", "real world assets", "private credit", "stablecoin"]
+    token_match: ["rwa", "stablecoin"]
+    phrase_match: ["tokenization", "real world assets", "private credit"]
+    regex_match: ["tokeni[sz]ation"]
     verticals: ["RWA"]
     score_boost: 5
 
   OpenRouter:
-    keywords: ["openrouter", "model routing", "inference"]
+    token_match: ["openrouter", "inference"]
+    phrase_match: ["model routing"]
     verticals: ["AI"]
     score_boost: 5

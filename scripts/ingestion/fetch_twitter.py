@@ -19,6 +19,9 @@ from source_config import (
     normalize_source_type,
 )
 
+DEFAULT_SOURCE_HEALTH_PATH = Path("data/metadata/source_health.jsonl")
+VALID_FEED_ROOT_NAMES = {"feed", "rss", "rdf"}
+
 
 def safe_int(value, default=1):
     try:
@@ -93,6 +96,82 @@ def clean_text(value):
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+def normalize_content_type(headers):
+    if not headers:
+        return ""
+
+    content_type = ""
+
+    if hasattr(headers, "get_content_type"):
+        try:
+            content_type = headers.get_content_type() or ""
+        except Exception:
+            content_type = ""
+
+    if not content_type and hasattr(headers, "get"):
+        content_type = headers.get("Content-Type", "") or headers.get("content-type", "")
+
+    return str(content_type or "").split(";", 1)[0].strip().lower()
+
+
+def looks_like_html(feed_xml):
+    sample = str(feed_xml or "").lstrip().lower()[:800]
+
+    if not sample:
+        return False
+
+    return (
+        sample.startswith("<!doctype html")
+        or sample.startswith("<html")
+        or "<html" in sample
+        or "<body" in sample
+        or "<head" in sample
+    )
+
+
+def diagnose_feed_xml(feed_xml, status=None, content_type=""):
+    if status is not None:
+        try:
+            if int(status) >= 400:
+                return f"http_status_{int(status)}"
+        except (TypeError, ValueError):
+            pass
+
+    normalized_type = str(content_type or "").strip().lower()
+
+    if normalized_type in {"text/html", "application/xhtml+xml"}:
+        return "html_response"
+
+    if looks_like_html(feed_xml):
+        return "html_response"
+
+    body = str(feed_xml or "").strip()
+
+    if not body:
+        return "empty_response"
+
+    try:
+        root = ET.fromstring(feed_xml)
+    except ET.ParseError:
+        return "malformed_xml"
+
+    root_name = local_name(root.tag)
+
+    if root_name not in VALID_FEED_ROOT_NAMES:
+        return f"unsupported_format_{root_name}"
+
+    return ""
+
+
+class FeedValidationError(Exception):
+    def __init__(self, feed_url, error_reason, status=None, content_type=""):
+        super().__init__(error_reason)
+        self.feed_url = feed_url
+        self.error_reason = error_reason
+        self.status = status
+        self.content_type = content_type
 
 
 def first_xml_text(element, names):
@@ -213,8 +292,45 @@ def fetch_feed_xml(feed_url, timeout=20):
         }
     )
 
-    with urlopen(request, timeout=timeout) as response:
-        return response.read().decode(response.headers.get_content_charset() or "utf-8", errors="replace")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            status = getattr(response, "status", None) or response.getcode()
+            content_type = normalize_content_type(getattr(response, "headers", None))
+            charset = ""
+
+            if getattr(response, "headers", None) and hasattr(response.headers, "get_content_charset"):
+                try:
+                    charset = response.headers.get_content_charset() or ""
+                except Exception:
+                    charset = ""
+
+            feed_xml = response.read().decode(charset or "utf-8", errors="replace")
+    except HTTPError as exc:
+        status = getattr(exc, "code", None)
+        content_type = normalize_content_type(getattr(exc, "headers", None))
+        raise FeedValidationError(
+            feed_url=feed_url,
+            error_reason=f"http_status_{status}" if status is not None else "http_error",
+            status=status,
+            content_type=content_type,
+        ) from exc
+    except URLError as exc:
+        raise FeedValidationError(
+            feed_url=feed_url,
+            error_reason="url_error",
+        ) from exc
+
+    error_reason = diagnose_feed_xml(feed_xml, status=status, content_type=content_type)
+
+    if error_reason:
+        raise FeedValidationError(
+            feed_url=feed_url,
+            error_reason=error_reason,
+            status=status,
+            content_type=content_type,
+        )
+
+    return feed_xml
 
 
 def get_first(record, keys):
@@ -361,8 +477,29 @@ def normalize_feed_record(feed_record, feed_url, handle, source_meta):
 
 
 def build_feed_records(feed_url, handle, source_meta, twitter_sources):
-    feed_xml = fetch_feed_xml(feed_url)
-    parsed_records = extract_feed_items(feed_xml, feed_url)
+    checked_at = datetime.now(UTC).isoformat()
+    source_name = source_meta.get("source_name") or handle or feed_url
+    health_record = {
+        "source_name": source_name,
+        "source_type": "twitter",
+        "feed_url": feed_url,
+        "status": "ok",
+        "error_reason": "",
+        "checked_at": checked_at,
+    }
+
+    try:
+        feed_xml = fetch_feed_xml(feed_url)
+        parsed_records = extract_feed_items(feed_xml, feed_url)
+    except FeedValidationError as exc:
+        health_record["status"] = "failed"
+        health_record["error_reason"] = exc.error_reason
+        return [], health_record
+    except ET.ParseError:
+        health_record["status"] = "failed"
+        health_record["error_reason"] = "malformed_xml"
+        return [], health_record
+
     records = []
 
     for parsed_record in parsed_records:
@@ -376,7 +513,7 @@ def build_feed_records(feed_url, handle, source_meta, twitter_sources):
         if built:
             records.append(built)
 
-    return records
+    return records, health_record
 
 
 def safe_file_stem(value):
@@ -431,15 +568,25 @@ def main():
         action="store_true",
         help="Fetch configured RSS/Atom feed URLs from config/sources.yml."
     )
+    parser.add_argument(
+        "--source-health-path",
+        default=str(DEFAULT_SOURCE_HEALTH_PATH),
+        help="JSONL file where Twitter feed health checks are written."
+    )
 
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    source_health_path = Path(args.source_health_path)
 
     twitter_sources = load_twitter_sources(args.sources_file)
     input_files = collect_inputs(args.inputs)
     wrote_anything = False
+    feed_output_files = 0
+    feed_successes = 0
+    feed_failures = 0
+    health_records = []
 
     if not input_files and not args.feeds:
         parser.error("provide one or more JSONL inputs, or pass --feeds")
@@ -495,19 +642,26 @@ def main():
                 configured_feeds.append((handle, feed_url, meta))
 
         configured_feeds.sort(key=lambda item: (item[0], item[1]))
+        total_feeds = len(configured_feeds)
 
         if not configured_feeds:
             print("No Twitter feed URLs were configured.")
         else:
             for handle, feed_url, meta in configured_feeds:
-                try:
-                    records = build_feed_records(feed_url, handle, meta, twitter_sources)
-                except (HTTPError, URLError, ET.ParseError, ValueError) as exc:
-                    print(f"Skipped feed for {handle or feed_url}: {exc}")
+                records, health_record = build_feed_records(feed_url, handle, meta, twitter_sources)
+                health_records.append(health_record)
+
+                if health_record["status"] != "ok":
+                    feed_failures += 1
+                    print(
+                        f"Skipped feed for {handle or feed_url}: "
+                        f"{health_record['error_reason']}"
+                    )
                     continue
 
+                feed_successes += 1
+
                 if not records:
-                    print(f"Skipped empty feed: {feed_url}")
                     continue
 
                 output_name = (
@@ -518,11 +672,18 @@ def main():
                 output_path = output_dir / output_name
 
                 write_records(output_path, records)
-
-                print(f"Wrote: {output_path} ({len(records)} items from {handle})")
+                feed_output_files += 1
                 wrote_anything = True
 
-    if not wrote_anything:
+        source_health_path.parent.mkdir(parents=True, exist_ok=True)
+        write_records(source_health_path, health_records)
+        print(
+            f"Twitter feeds: configured={total_feeds} "
+            f"fetched={feed_successes} failed={feed_failures} "
+            f"output_files={feed_output_files}"
+        )
+
+    if not wrote_anything and not args.feeds:
         print("No Twitter items were written.")
 
 

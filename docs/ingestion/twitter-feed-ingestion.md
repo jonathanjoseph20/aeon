@@ -36,6 +36,25 @@ python3 scripts/ingestion/fetch_twitter.py --feeds
 
 That writes normalized JSONL items into `data/intake/twitter/`.
 
+## Validate a Feed URL
+
+A feed URL is valid only if it returns a successful HTTP response, advertises an XML/RSS/Atom content type when available, and parses as well-formed feed XML.
+
+Quick checks:
+
+1. Run the fetcher against your configured sources.
+2. Inspect `data/metadata/source_health.jsonl` for `status` and `error_reason`.
+3. If a feed fails, verify it is not returning an HTML error page or a login page.
+
+Typical failure reasons include:
+
+- `http_status_403`
+- `http_status_404`
+- `html_response`
+- `malformed_xml`
+
+If you want a manual pre-check, compare the response headers and body before wiring the URL into `config/sources.yml`.
+
 ## Smoke Command
 
 For a quick verification run:
