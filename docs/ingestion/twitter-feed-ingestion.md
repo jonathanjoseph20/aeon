@@ -6,9 +6,10 @@ This keeps ingestion deterministic-first and avoids adding any LLM dependency.
 ## Quick Setup
 
 1. Open `config/sources.yml`.
-2. Add or update a `source_type: twitter` entry with `source_name`, `handle`, and `feed_url`.
-3. Use a feed URL you are allowed to access, such as an RSS or Atom endpoint provided by a compliant feed source.
-4. Set `priority`, `default_verticals`, `watchlist_boost`, and `promotion_threshold_override` as needed.
+2. Add or update a `source_type: twitter` entry with `source_name` and `handle` or `twitter_handle`.
+3. If you omit `feed_url`, AEON generates `https://rsshub.app/twitter/user/<handle>` automatically.
+4. If you want a different proxy or a self-hosted RSSHub instance, set `feed_url` explicitly and AEON will preserve it.
+5. Set `priority`, `default_verticals`, `watchlist_boost`, and `promotion_threshold_override` as needed.
 
 Example:
 
@@ -16,8 +17,7 @@ Example:
 sources:
   - source_name: Aaron J. Mars
     source_type: twitter
-    handle: aaronjmars
-    feed_url: https://example.com/feeds/aaronjmars.xml
+    twitter_handle: aaronjmars
     priority: high
     default_verticals: [AI, Agents]
     watchlist_boost: 1
@@ -25,6 +25,8 @@ sources:
     digest_enabled: true
     alert_enabled: true
 ```
+
+AEON resolves the feed to `https://rsshub.app/twitter/user/aaronjmars` unless you provide an explicit `feed_url`.
 
 ## Run It
 
@@ -44,7 +46,7 @@ Quick checks:
 
 1. Run the fetcher against your configured sources.
 2. Inspect `data/metadata/source_health.jsonl` for `status` and `error_reason`.
-3. If a feed fails, verify it is not returning an HTML error page or a login page.
+3. If a feed fails, verify the RSSHub endpoint is reachable and that it is still returning XML rather than an HTML error page or login wall.
 
 Typical failure reasons include:
 
@@ -52,6 +54,8 @@ Typical failure reasons include:
 - `http_status_404`
 - `html_response`
 - `malformed_xml`
+
+RSSHub is the only deterministic Twitter feed source AEON auto-generates today, so if that service is down or changes its route shape, Twitter ingestion will fail until the feed URL is overridden or RSSHub recovers.
 
 If you want a manual pre-check, compare the response headers and body before wiring the URL into `config/sources.yml`.
 

@@ -78,6 +78,42 @@ class FetchTwitterFixtureTests(unittest.TestCase):
         )
         return sources_path
 
+    def test_handle_only_sources_generate_rsshub_feed_urls(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir = Path(temp_dir)
+            sources_path = temp_dir / "sources.yml"
+            sources_path.write_text(
+                "\n".join(
+                    [
+                        "twitter:",
+                        "  - source_name: Zero X NGMI",
+                        "    source_type: twitter",
+                        "    twitter_handle: 0xngmi",
+                        "  - source_name: Custom Feed Override",
+                        "    source_type: twitter",
+                        "    twitter_handle: customfeed",
+                        "    feed_url: https://example.invalid/custom.xml",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            registry = fetch_twitter.load_twitter_sources(sources_path)
+
+            self.assertEqual(
+                fetch_twitter.build_twitter_feed_url(" @0xngmi "),
+                "https://rsshub.app/twitter/user/0xngmi",
+            )
+            self.assertEqual(
+                registry["0xngmi"]["feed_urls"],
+                ["https://rsshub.app/twitter/user/0xngmi"],
+            )
+            self.assertEqual(
+                registry["customfeed"]["feed_urls"],
+                ["https://example.invalid/custom.xml"],
+            )
+
     def test_manual_jsonl_ingestion_writes_normalized_twitter_records(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)

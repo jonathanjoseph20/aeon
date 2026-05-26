@@ -28,6 +28,15 @@ def normalize_handle(value):
     return normalize_text(value).lstrip("@").lower()
 
 
+def build_twitter_feed_url(handle, rsshub_base="https://rsshub.app"):
+    normalized_handle = normalize_handle(handle)
+
+    if not normalized_handle:
+        return ""
+
+    return f"{normalize_text(rsshub_base).rstrip('/')}/twitter/user/{normalized_handle}"
+
+
 def normalize_int(value, default=0):
     try:
         return int(value)
@@ -75,7 +84,20 @@ def normalize_feed_urls(entry):
     if isinstance(feed_urls, str):
         feed_urls = [feed_urls]
 
-    return [normalize_text(url) for url in feed_urls if normalize_text(url)]
+    normalized_feed_urls = [normalize_text(url) for url in feed_urls if normalize_text(url)]
+
+    if normalized_feed_urls:
+        return normalized_feed_urls
+
+    if normalize_source_type(entry.get("source_type")) == "twitter":
+        generated_url = build_twitter_feed_url(
+            entry.get("twitter_handle") or entry.get("handle") or entry.get("source_handle")
+        )
+
+        if generated_url:
+            return [generated_url]
+
+    return []
 
 
 def normalize_source_type(value, fallback=""):
@@ -93,10 +115,15 @@ def normalize_source_type(value, fallback=""):
 def normalize_source_entry(entry, source_type_hint=""):
     source_type = normalize_source_type(entry.get("source_type"), source_type_hint)
     feed_urls = normalize_feed_urls(entry)
+    handle = normalize_handle(
+        entry.get("handle")
+        or entry.get("twitter_handle")
+        or entry.get("source_handle")
+    )
     source_name = (
         entry.get("source_name")
         or entry.get("name")
-        or entry.get("handle")
+        or handle
         or entry.get("gmail_label")
         or entry.get("source_url")
         or (feed_urls[0] if feed_urls else "")
@@ -125,7 +152,8 @@ def normalize_source_entry(entry, source_type_hint=""):
             ),
             "digest_enabled": normalize_bool(entry.get("digest_enabled"), True),
             "alert_enabled": normalize_bool(entry.get("alert_enabled"), True),
-            "handle": normalize_handle(entry.get("handle") or entry.get("source_handle")),
+            "handle": handle,
+            "twitter_handle": normalize_handle(entry.get("twitter_handle") or handle),
             "gmail_label": normalize_text(entry.get("gmail_label")),
             "source_domain": normalize_text(entry.get("source_domain")),
             "source_url": normalize_text(entry.get("source_url")),

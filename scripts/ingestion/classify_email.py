@@ -102,13 +102,17 @@ def load_twitter_registry():
         if source_type != "twitter" and not entry.get("feed_url") and not entry.get("feed_urls"):
             continue
 
-        handle = normalize_handle(entry.get("handle"))
+        handle = normalize_handle(
+            entry.get("handle")
+            or entry.get("twitter_handle")
+            or entry.get("source_handle")
+        )
 
         if not handle:
             continue
 
         registry[handle] = {
-            "name": entry.get("source_name") or entry.get("name") or entry.get("handle") or "Unknown",
+            "name": entry.get("source_name") or entry.get("name") or handle or "Unknown",
             "priority": entry.get("priority", "low"),
             "importance_score": safe_int(entry.get("importance_score", 1)),
             "verticals": entry.get("default_verticals") or entry.get("verticals", []) or []

@@ -13,6 +13,7 @@ from xml.etree import ElementTree as ET
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from source_config import (
+    build_twitter_feed_url,
     load_source_entries,
     normalize_feed_urls,
     normalize_handle,
