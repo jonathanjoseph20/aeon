@@ -1,0 +1,12 @@
+sources:
+  - source_name: Bankless
+    source_type: newsletter
+    gmail_label: Research/DeFi
+    source_domain: banklesshq.com
+    priority: high
+    default_verticals:
+      - DeFi
+    watchlist_boost: 2
+    promotion_threshold_override: 7
+    digest_enabled: true
+    alert_enabled: true

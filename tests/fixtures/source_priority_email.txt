@@ -1,0 +1,10 @@
+SOURCE: Unknown
+SOURCE_DOMAIN: banklesshq.com
+KNOWN_SOURCE: False
+SENDER: Bankless <news@banklesshq.com>
+SUBJECT: Weekly market wrap
+PRIORITY: low
+GMAIL_LABEL: Research/DeFi
+IMPORTANCE_SCORE: 1
+
+Weekly market wrap with no special watchlist notes.

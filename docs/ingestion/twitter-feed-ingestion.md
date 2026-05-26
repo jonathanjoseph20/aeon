@@ -6,19 +6,24 @@ This keeps ingestion deterministic-first and avoids adding any LLM dependency.
 ## Quick Setup
 
 1. Open `config/sources.yml`.
-2. Add a `feed_url` next to any Twitter handle you want AEON to fetch.
+2. Add or update a `source_type: twitter` entry with `source_name`, `handle`, and `feed_url`.
 3. Use a feed URL you are allowed to access, such as an RSS or Atom endpoint provided by a compliant feed source.
-4. Keep the existing `handle` so AEON can attach the right source metadata.
+4. Set `priority`, `default_verticals`, `watchlist_boost`, and `promotion_threshold_override` as needed.
 
 Example:
 
 ```yaml
-twitter:
-  - handle: aaronjmars
-    name: Aaron J. Mars
+sources:
+  - source_name: Aaron J. Mars
+    source_type: twitter
+    handle: aaronjmars
     feed_url: https://example.com/feeds/aaronjmars.xml
     priority: high
-    importance_score: 6
+    default_verticals: [AI, Agents]
+    watchlist_boost: 1
+    promotion_threshold_override: 6
+    digest_enabled: true
+    alert_enabled: true
 ```
 
 ## Run It

@@ -1,5 +1,10 @@
 import json
+import sys
 from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from source_config import is_enabled
 
 log_path = Path("data/processed/intake_log.jsonl")
 alert_path = Path("data/processed/alert_candidates.jsonl")
@@ -20,6 +25,9 @@ for line in log_path.read_text().splitlines():
 
     importance_score = int(item.get("importance_score", 1))
     watchlist_hits = item.get("watchlist_hits", [])
+
+    if not is_enabled(item, "alert_enabled", True):
+        continue
 
     if importance_score >= 8 or watchlist_hits:
         alerts.append(item)

@@ -1,33 +1,44 @@
-# Optional per-account field:
-#   feed_url: RSS or Atom feed URL for low-cost feed-based ingestion.
+# Canonical AEON source registry.
+# Supported fields:
+#   source_name, source_type, priority, default_verticals, feed_url,
+#   watchlist_boost, promotion_threshold_override, digest_enabled, alert_enabled
+#
+# Legacy optional fields such as `importance_score` are still honored.
 
-twitter:
-  - handle: aaronjmars
-    name: Aaron J. Mars
-    verticals:
+sources:
+  - source_name: Aaron J. Mars
+    source_type: twitter
+    handle: aaronjmars
+    feed_url: https://example.com/feeds/aaronjmars.xml
+    priority: high
+    default_verticals:
       - AI
       - Agents
-    priority: high
+    watchlist_boost: 1
+    promotion_threshold_override: 6
+    digest_enabled: true
+    alert_enabled: true
     importance_score: 6
 
-  - handle: VeniceAILabs
-    name: Venice AI Labs
-    verticals:
-      - AI
-      - DeFi
-    priority: high
-    importance_score: 6
-
-newsletters:
-  - name: Bankless
-    verticals:
-      - DeFi
+  - source_name: Bankless
+    source_type: newsletter
     gmail_label: Research/DeFi
+    source_domain: banklesshq.com
     priority: high
+    default_verticals:
+      - DeFi
+    watchlist_boost: 2
+    promotion_threshold_override: 7
+    digest_enabled: true
+    alert_enabled: true
+    importance_score: 8
 
-  - name: The Rollup
-    verticals:
-      - RWA
-      - AI
-    gmail_label: Research/RWA
-    priority: high
+  - source_name: Macro PDF Brief
+    source_type: pdf
+    priority: medium
+    default_verticals:
+      - Macro
+    watchlist_boost: 1
+    promotion_threshold_override: 5
+    digest_enabled: false
+    alert_enabled: false

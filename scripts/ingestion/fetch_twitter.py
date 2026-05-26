@@ -12,15 +12,12 @@ from xml.etree import ElementTree as ET
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-import yaml
-
-
-def load_yaml(path):
-    if not path.exists():
-        return {}
-
-    with path.open("r") as f:
-        return yaml.safe_load(f) or {}
+from source_config import (
+    load_source_entries,
+    normalize_feed_urls,
+    normalize_handle,
+    normalize_source_type,
+)
 
 
 def safe_int(value, default=1):
@@ -33,10 +30,6 @@ def safe_int(value, default=1):
 def compute_dedupe_hash(text):
     normalized_content = str(text or "").lower().strip()
     return hashlib.sha256(normalized_content.encode("utf-8")).hexdigest()[:16]
-
-
-def normalize_handle(value):
-    return str(value or "").strip().lstrip("@").lower()
 
 
 def collect_inputs(inputs):
@@ -54,25 +47,37 @@ def collect_inputs(inputs):
 
 
 def load_twitter_sources(sources_path=Path("config/sources.yml")):
-    config = load_yaml(Path(sources_path))
+    source_entries = load_source_entries(Path(sources_path))
     registry = {}
 
-    for entry in config.get("twitter", []) or []:
-        handle = normalize_handle(entry.get("handle"))
-        feed_urls = entry.get("feed_url") or entry.get("feed_urls") or []
+    for entry in source_entries:
+        source_type = normalize_source_type(entry.get("source_type"))
 
-        if isinstance(feed_urls, str):
-            feed_urls = [feed_urls]
+        if source_type != "twitter" and not normalize_feed_urls(entry):
+            continue
+
+        handle = normalize_handle(
+            entry.get("handle")
+            or entry.get("source_handle")
+            or entry.get("source_name")
+            or entry.get("feed_url")
+        )
 
         if not handle:
             continue
 
         registry[handle] = {
-            "name": entry.get("name") or entry.get("handle") or "Unknown",
+            "source_name": entry.get("source_name") or entry.get("name") or entry.get("handle") or "Unknown",
+            "source_type": source_type or "twitter",
             "priority": entry.get("priority", "low"),
             "importance_score": safe_int(entry.get("importance_score", 1)),
-            "verticals": entry.get("verticals", []) or [],
-            "feed_urls": [str(url).strip() for url in feed_urls if str(url).strip()]
+            "default_verticals": entry.get("default_verticals", []) or [],
+            "verticals": entry.get("default_verticals", []) or entry.get("verticals", []) or [],
+            "feed_urls": normalize_feed_urls(entry),
+            "watchlist_boost": safe_int(entry.get("watchlist_boost"), 0),
+            "promotion_threshold_override": entry.get("promotion_threshold_override"),
+            "digest_enabled": entry.get("digest_enabled", True),
+            "alert_enabled": entry.get("alert_enabled", True),
         }
 
     return registry
@@ -269,7 +274,7 @@ def build_record(raw_record, source_file, twitter_sources):
 
     source_name = (
         raw_record.get("source_name")
-        or source_meta.get("name")
+        or source_meta.get("source_name")
         or handle
         or Path(source_file).stem
         or "twitter"
@@ -279,7 +284,7 @@ def build_record(raw_record, source_file, twitter_sources):
         raw_record.get("importance_score"),
         source_meta.get("importance_score", 1)
     )
-    verticals = raw_record.get("verticals") or source_meta.get("verticals", [])
+    verticals = raw_record.get("verticals") or source_meta.get("default_verticals") or source_meta.get("verticals", [])
     subject = raw_record.get("subject") or text[:120]
     source_url = get_first(raw_record, ["url", "tweet_url", "source_url"])
     source_file_value = raw_record.get("source_file") or str(source_file)
@@ -321,13 +326,19 @@ def normalize_feed_record(feed_record, feed_url, handle, source_meta):
 
     return {
         "source_handle": handle,
-        "source_name": feed_record.get("source_name") or source_meta.get("name") or handle or feed_url,
+        "source_name": feed_record.get("source_name") or source_meta.get("source_name") or handle or feed_url,
+        "source_type": "twitter",
         "priority": feed_record.get("priority") or source_meta.get("priority", "low"),
         "importance_score": safe_int(
             feed_record.get("importance_score"),
             source_meta.get("importance_score", 1)
         ),
-        "verticals": feed_record.get("verticals") or source_meta.get("verticals", []),
+        "verticals": feed_record.get("verticals") or source_meta.get("default_verticals") or source_meta.get("verticals", []),
+        "default_verticals": source_meta.get("default_verticals", []),
+        "watchlist_boost": safe_int(source_meta.get("watchlist_boost"), 0),
+        "promotion_threshold_override": source_meta.get("promotion_threshold_override"),
+        "digest_enabled": source_meta.get("digest_enabled", True),
+        "alert_enabled": source_meta.get("alert_enabled", True),
         "source_file": feed_url,
         "source_url": feed_record.get("source_url") or feed_url,
         "source_domain": "x.com" if handle else "",

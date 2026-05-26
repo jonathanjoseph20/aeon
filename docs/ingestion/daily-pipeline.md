@@ -14,7 +14,9 @@ Optional inputs are picked up automatically when they are configured or present:
 
 - Gmail intake runs when `credentials/token.json` or `credentials/gmail_credentials.json` exists.
 - Local PDF ingestion runs when `data/intake/pdf/` contains `*.pdf` files.
-- Twitter feed ingestion runs when `config/sources.yml` contains configured `feed_url` or `feed_urls` values.
+- Twitter feed ingestion runs when `config/sources.yml` contains configured Twitter source entries with `feed_url` values.
+
+Source-specific scoring and downstream filtering are controlled in [Source Configuration](./source-configuration.md).
 
 Dry run the pipeline without executing any steps:
 

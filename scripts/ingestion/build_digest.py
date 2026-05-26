@@ -3,6 +3,12 @@ from collections import defaultdict
 from datetime import datetime, UTC
 from pathlib import Path
 
+import sys
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from source_config import is_enabled
+
 log_path = Path("data/processed/intake_log.jsonl")
 cluster_path = Path("data/processed/topic_clusters.jsonl")
 digest_path = Path("data/processed/daily_digest.md")
@@ -109,6 +115,9 @@ for line in log_path.read_text().splitlines():
     item_id = get_item_id(item)
 
     if item_id in seen:
+        continue
+
+    if not is_enabled(item, "digest_enabled", True):
         continue
 
     seen.add(item_id)

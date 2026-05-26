@@ -9,6 +9,15 @@ import yaml
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+from source_config import (
+    find_source_entry,
+    is_enabled,
+    load_source_entries,
+    merge_priority,
+    merge_verticals,
+    normalize_source_type,
+    priority_score_boost,
+)
 from utils.clean_text import clean_email_text
 
 
@@ -84,17 +93,24 @@ def load_twitter_registry():
     config = load_yaml(Path("config/sources.yml"))
     registry = {}
 
-    for entry in config.get("twitter", []) or []:
+    entries = config.get("sources") or config.get("twitter", []) or []
+
+    for entry in entries:
+        source_type = normalize_source_type(entry.get("source_type"), "twitter")
+
+        if source_type != "twitter" and not entry.get("feed_url") and not entry.get("feed_urls"):
+            continue
+
         handle = normalize_handle(entry.get("handle"))
 
         if not handle:
             continue
 
         registry[handle] = {
-            "name": entry.get("name") or entry.get("handle") or "Unknown",
+            "name": entry.get("source_name") or entry.get("name") or entry.get("handle") or "Unknown",
             "priority": entry.get("priority", "low"),
             "importance_score": safe_int(entry.get("importance_score", 1)),
-            "verticals": entry.get("verticals", []) or []
+            "verticals": entry.get("default_verticals") or entry.get("verticals", []) or []
         }
 
     return registry
@@ -231,7 +247,7 @@ def build_raw_items():
     return items
 
 
-def enrich_metadata(raw_item, email_registry, twitter_registry):
+def enrich_metadata(raw_item, email_registry, twitter_registry, source_entries):
     source_type = str(raw_item.get("source_type") or "email_manual").lower()
     source_name = raw_item.get("source_name") or "Unknown"
     priority = raw_item.get("priority", "low")
@@ -239,6 +255,10 @@ def enrich_metadata(raw_item, email_registry, twitter_registry):
     source_verticals = list(raw_item.get("verticals") or [])
     source_domain = raw_item.get("source_domain", "")
     known_source = str(raw_item.get("known_source", "False"))
+    source_watchlist_boost = safe_int(raw_item.get("watchlist_boost"), 0)
+    source_promotion_threshold_override = raw_item.get("promotion_threshold_override")
+    source_digest_enabled = is_enabled(raw_item, "digest_enabled", True)
+    source_alert_enabled = is_enabled(raw_item, "alert_enabled", True)
 
     if source_type.startswith("email"):
         sender = raw_item.get("sender", "")
@@ -258,7 +278,10 @@ def enrich_metadata(raw_item, email_registry, twitter_registry):
                     metadata.get("importance_score", importance_score),
                     importance_score
                 )
-                source_verticals = metadata.get("default_verticals", []) or []
+                source_verticals = merge_verticals(
+                    source_verticals,
+                    metadata.get("default_verticals", []) or []
+                )
                 known_source = "True"
                 break
 
@@ -278,7 +301,10 @@ def enrich_metadata(raw_item, email_registry, twitter_registry):
                 metadata.get("importance_score", importance_score),
                 importance_score
             )
-            source_verticals = metadata.get("verticals", []) or []
+            source_verticals = merge_verticals(
+                source_verticals,
+                metadata.get("verticals", []) or []
+            )
             known_source = "True"
         elif raw_item.get("source_name"):
             source_name = raw_item["source_name"]
@@ -296,6 +322,30 @@ def enrich_metadata(raw_item, email_registry, twitter_registry):
     if raw_item.get("importance_score") is not None:
         importance_score = safe_int(raw_item.get("importance_score"), importance_score)
 
+    source_config = find_source_entry(raw_item, source_entries or [])
+
+    if source_config:
+        source_name = source_config.get("source_name") or source_name
+        priority = merge_priority(priority, source_config.get("priority", priority))
+        importance_score = max(
+            importance_score,
+            safe_int(source_config.get("importance_score", importance_score), importance_score)
+        )
+        source_verticals = merge_verticals(
+            source_verticals,
+            source_config.get("default_verticals", []) or []
+        )
+        source_watchlist_boost = safe_int(source_config.get("watchlist_boost"), 0)
+        source_promotion_threshold_override = source_config.get(
+            "promotion_threshold_override"
+        )
+        source_digest_enabled = is_enabled(source_config, "digest_enabled", True)
+        source_alert_enabled = is_enabled(source_config, "alert_enabled", True)
+        known_source = "True"
+
+    if source_config and source_config.get("priority"):
+        importance_score += priority_score_boost(source_config.get("priority"))
+
     return {
         "source_type": source_type,
         "source_name": source_name or "Unknown",
@@ -303,7 +353,11 @@ def enrich_metadata(raw_item, email_registry, twitter_registry):
         "importance_score": importance_score,
         "source_verticals": source_verticals,
         "source_domain": source_domain,
-        "known_source": known_source
+        "known_source": known_source,
+        "watchlist_boost": source_watchlist_boost,
+        "promotion_threshold_override": source_promotion_threshold_override,
+        "digest_enabled": source_digest_enabled,
+        "alert_enabled": source_alert_enabled,
     }
 
 
@@ -337,8 +391,21 @@ def source_identity(raw_item):
     )
 
 
-def classify_item(raw_item, email_registry, twitter_registry, verticals, watchlist, seen):
-    metadata = enrich_metadata(raw_item, email_registry, twitter_registry)
+def classify_item(
+    raw_item,
+    email_registry,
+    twitter_registry,
+    verticals,
+    watchlist,
+    seen,
+    source_entries=None,
+):
+    metadata = enrich_metadata(
+        raw_item,
+        email_registry,
+        twitter_registry,
+        source_entries if source_entries is not None else load_source_entries(),
+    )
 
     subject = str(raw_item.get("subject") or "").strip()
     content = normalize_content(raw_item)
@@ -415,6 +482,9 @@ def classify_item(raw_item, email_registry, twitter_registry, verticals, watchli
         elif metadata["importance_score"] >= 4:
             metadata["priority"] = "medium"
 
+    if watchlist_hits and metadata.get("watchlist_boost"):
+        metadata["importance_score"] += safe_int(metadata.get("watchlist_boost"), 0)
+
     matched_verticals = [
         vertical for vertical, score in scores.items()
         if score >= 2
@@ -448,6 +518,10 @@ def classify_item(raw_item, email_registry, twitter_registry, verticals, watchli
         "verticals": matched_verticals,
         "scores": scores,
         "watchlist_hits": watchlist_hits,
+        "watchlist_boost": metadata.get("watchlist_boost", 0),
+        "promotion_threshold_override": metadata.get("promotion_threshold_override"),
+        "digest_enabled": metadata.get("digest_enabled", True),
+        "alert_enabled": metadata.get("alert_enabled", True),
         "content_preview": content[:200]
     }
 
@@ -476,6 +550,7 @@ def main():
 
     email_registry = load_email_registry()
     twitter_registry = load_twitter_registry()
+    source_entries = load_source_entries()
     verticals = load_verticals()
     watchlist = load_watchlist()
     seen = existing_hashes(log_path)
@@ -494,7 +569,8 @@ def main():
             twitter_registry,
             verticals,
             watchlist,
-            seen
+            seen,
+            source_entries,
         )
 
         if not record:

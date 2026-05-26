@@ -128,10 +128,20 @@ def get_importance_score(item):
     return safe_int(item.get("importance_score"), 0)
 
 
+def get_effective_threshold(item, threshold):
+    override = item.get("promotion_threshold_override")
+
+    if override in (None, ""):
+        return threshold
+
+    return safe_int(override, threshold)
+
+
 def get_reasons(item, threshold):
     reasons = []
     score = get_importance_score(item)
     signal_band = build_signal_band(item)
+    threshold = get_effective_threshold(item, threshold)
 
     if score > threshold:
         reasons.append(f"importance_score>{threshold}")
@@ -216,6 +226,7 @@ def build_event_record(
         "verticals": verticals,
         "tags": tags,
         "importance_score": importance_score,
+        "promotion_threshold_override": item.get("promotion_threshold_override"),
         "dedupe_hash": dedupe_hash,
         "signal_band": signal_band,
         "watchlist_hits": item.get("watchlist_hits", []),
@@ -245,6 +256,7 @@ def build_event_record(
         "verticals": verticals,
         "tags": tags,
         "importance_score": importance_score,
+        "promotion_threshold_override": item.get("promotion_threshold_override"),
         "dedupe_hash": dedupe_hash,
         "signal_band": signal_band,
         "watchlist_hits": item.get("watchlist_hits", []),

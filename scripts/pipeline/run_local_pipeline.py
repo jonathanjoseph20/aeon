@@ -5,6 +5,10 @@ from pathlib import Path
 
 import yaml
 
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from source_config import load_source_entries, normalize_source_type
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INGESTION_DIR = REPO_ROOT / "scripts" / "ingestion"
@@ -45,10 +49,8 @@ def normalize_feed_urls(entry):
 
 
 def has_twitter_feeds(sources_file):
-    config = load_yaml(sources_file)
-
-    for entry in config.get("twitter", []) or []:
-        if normalize_feed_urls(entry):
+    for entry in load_source_entries(sources_file):
+        if normalize_source_type(entry.get("source_type")) == "twitter" and normalize_feed_urls(entry):
             return True
 
     return False
