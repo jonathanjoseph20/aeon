@@ -37,7 +37,12 @@ for vertical, items in sorted(vertical_map.items()):
         preview = re.sub(r"https?://\S+", "", preview)
         preview = re.sub(r"\s+", " ", preview).strip()
 
-        source = item.get("source_name") or item["source_file"]
+        source = (
+            item.get("source_name")
+            or item.get("source_handle")
+            or item.get("author_handle")
+            or item["source_file"]
+        )
         subject = item.get("subject", "")
         priority = item.get("priority", "low")
         item_id = item.get("item_id", "no-id")

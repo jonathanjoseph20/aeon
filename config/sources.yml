@@ -1,15 +1,19 @@
 twitter:
   - handle: aaronjmars
+    name: Aaron J. Mars
     verticals:
       - AI
       - Agents
     priority: high
+    importance_score: 6
 
   - handle: VeniceAILabs
+    name: Venice AI Labs
     verticals:
       - AI
       - DeFi
     priority: high
+    importance_score: 6
 
 newsletters:
   - name: Bankless

@@ -1,8 +1,16 @@
-import yaml
-import json
 import hashlib
-from pathlib import Path
+import json
+import sys
 from datetime import datetime, UTC
+from email.utils import parseaddr
+from pathlib import Path
+
+import yaml
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from utils.clean_text import clean_email_text
+
 
 IGNORE_SUBJECT_PATTERNS = [
     "welcome",
@@ -26,137 +34,366 @@ GMAIL_LABEL_VERTICAL_PRIORS = {
     "Research/Personal": ["Personal"]
 }
 
-with open("config/verticals.yml", "r") as f:
-    verticals = yaml.safe_load(f)
 
-watchlist_path = Path("config/watchlist.yml")
-if watchlist_path.exists():
-    with watchlist_path.open("r") as f:
-        watchlist = yaml.safe_load(f) or {}
-else:
-    watchlist = {}
+def load_yaml(path):
+    if not path.exists():
+        return {}
 
-email_folder = Path("data/intake/email")
-log_path = Path("data/processed/intake_log.jsonl")
+    with path.open("r") as f:
+        return yaml.safe_load(f) or {}
 
-log_path.parent.mkdir(parents=True, exist_ok=True)
-log_path.touch(exist_ok=True)
 
-existing_ids = set()
+def safe_int(value, default=1):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
-with open(log_path, "r") as f:
-    for line in f:
-        if line.strip():
-            existing_ids.add(json.loads(line).get("item_id"))
 
-files = sorted(email_folder.glob("*.txt"))
+def normalize_handle(value):
+    return str(value or "").strip().lstrip("@").lower()
 
-for email_path in files:
 
-    raw_content = email_path.read_text()
+def infer_source_from_sender(sender):
+    display_name, email = parseaddr(sender)
+    domain = email.split("@")[-1].lower() if "@" in email else ""
+    suggested_name = display_name.strip().replace('"', "")
 
+    if not suggested_name and domain:
+        suggested_name = (
+            domain.split(".")[0]
+            .replace("-", " ")
+            .replace("_", " ")
+            .title()
+        )
+
+    return domain, suggested_name
+
+
+def load_email_registry():
+    registry_path = Path("data/metadata/email_sources.json")
+
+    if not registry_path.exists():
+        return {}
+
+    with registry_path.open("r") as f:
+        return json.load(f)
+
+
+def load_twitter_registry():
+    config = load_yaml(Path("config/sources.yml"))
+    registry = {}
+
+    for entry in config.get("twitter", []) or []:
+        handle = normalize_handle(entry.get("handle"))
+
+        if not handle:
+            continue
+
+        registry[handle] = {
+            "name": entry.get("name") or entry.get("handle") or "Unknown",
+            "priority": entry.get("priority", "low"),
+            "importance_score": safe_int(entry.get("importance_score", 1)),
+            "verticals": entry.get("verticals", []) or []
+        }
+
+    return registry
+
+
+def load_verticals():
+    return load_yaml(Path("config/verticals.yml"))
+
+
+def load_watchlist():
+    path = Path("config/watchlist.yml")
+
+    if not path.exists():
+        return {}
+
+    return load_yaml(path)
+
+
+def existing_hashes(log_path):
+    hashes = set()
+
+    if not log_path.exists():
+        return hashes
+
+    for line in log_path.read_text().splitlines():
+        if not line.strip():
+            continue
+
+        item = json.loads(line)
+        item_id = item.get("item_id")
+        dedupe_hash = item.get("dedupe_hash")
+
+        if item_id:
+            hashes.add(item_id)
+
+        if dedupe_hash:
+            hashes.add(dedupe_hash)
+
+    return hashes
+
+
+def parse_email_message(path):
     metadata = {
+        "source_type": "email_manual",
         "source_name": "Unknown",
         "source_domain": "",
-        "known_source": "",
+        "known_source": "False",
         "sender": "",
         "subject": "",
         "priority": "low",
         "importance_score": 1,
-        "gmail_label": ""
+        "gmail_label": "",
+        "source_id": path.stem,
+        "source_file": str(path),
+        "content": ""
     }
 
     body_lines = []
 
-    for line in raw_content.splitlines():
-
-        line = line.strip()
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
 
         if not line:
             continue
 
         if line.startswith("SOURCE:"):
             metadata["source_name"] = line.replace("SOURCE:", "").strip()
-
         elif line.startswith("SOURCE_DOMAIN:"):
-            metadata["source_domain"] = line.replace("SOURCE_DOMAIN:", "").strip()
-
+            metadata["source_domain"] = line.replace(
+                "SOURCE_DOMAIN:",
+                ""
+            ).strip()
         elif line.startswith("KNOWN_SOURCE:"):
-            metadata["known_source"] = line.replace("KNOWN_SOURCE:", "").strip()
-
+            metadata["known_source"] = line.replace(
+                "KNOWN_SOURCE:",
+                ""
+            ).strip()
         elif line.startswith("SENDER:"):
             metadata["sender"] = line.replace("SENDER:", "").strip()
-
         elif line.startswith("SUBJECT:"):
             metadata["subject"] = line.replace("SUBJECT:", "").strip()
-
         elif line.startswith("PRIORITY:"):
             metadata["priority"] = line.replace("PRIORITY:", "").strip()
-
         elif line.startswith("GMAIL_LABEL:"):
             metadata["gmail_label"] = line.replace("GMAIL_LABEL:", "").strip()
-
         elif line.startswith("IMPORTANCE_SCORE:"):
-            metadata["importance_score"] = int(
+            metadata["importance_score"] = safe_int(
                 line.replace("IMPORTANCE_SCORE:", "").strip()
             )
-
         else:
             body_lines.append(line)
 
-    subject_lower = metadata["subject"].lower()
+    metadata["content"] = " ".join(body_lines).strip()
+    return metadata
 
-    if any(pattern in subject_lower for pattern in IGNORE_SUBJECT_PATTERNS):
-        print(f"Ignored noise: {email_path.name} — {metadata['subject']}")
-        continue
 
-    content = " ".join(body_lines).strip()
-    normalized = content.lower()
-    searchable_text = f"{metadata['subject']} {content}".lower()
+def load_jsonl_records(folder, source_type):
+    records = []
+
+    if not folder.exists():
+        return records
+
+    for path in sorted(folder.glob("*.jsonl")):
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+
+            raw = json.loads(line)
+
+            if not isinstance(raw, dict):
+                continue
+
+            raw.setdefault("source_type", source_type)
+            raw.setdefault("source_file", str(path))
+            records.append(raw)
+
+    return records
+
+
+def build_raw_items():
+    items = []
+
+    email_folder = Path("data/intake/email")
+    pdf_folder = Path("data/intake/pdf")
+    twitter_folder = Path("data/intake/twitter")
+
+    if email_folder.exists():
+        for path in sorted(email_folder.glob("*.txt")):
+            items.append(parse_email_message(path))
+
+    items.extend(load_jsonl_records(pdf_folder, "pdf"))
+    items.extend(load_jsonl_records(twitter_folder, "twitter"))
+
+    return items
+
+
+def enrich_metadata(raw_item, email_registry, twitter_registry):
+    source_type = str(raw_item.get("source_type") or "email_manual").lower()
+    source_name = raw_item.get("source_name") or "Unknown"
+    priority = raw_item.get("priority", "low")
+    importance_score = safe_int(raw_item.get("importance_score", 1))
+    source_verticals = list(raw_item.get("verticals") or [])
+    source_domain = raw_item.get("source_domain", "")
+    known_source = str(raw_item.get("known_source", "False"))
+
+    if source_type.startswith("email"):
+        sender = raw_item.get("sender", "")
+        domain, suggested_name = infer_source_from_sender(sender)
+
+        if domain:
+            source_domain = domain
+
+        if not source_name or source_name == "Unknown":
+            source_name = suggested_name or "Unknown"
+
+        for registered_domain, metadata in email_registry.items():
+            if registered_domain.lower() in sender.lower():
+                source_name = metadata.get("name", source_name)
+                priority = metadata.get("priority", priority)
+                importance_score = safe_int(
+                    metadata.get("importance_score", importance_score),
+                    importance_score
+                )
+                source_verticals = metadata.get("default_verticals", []) or []
+                known_source = "True"
+                break
+
+    elif source_type == "twitter":
+        handle = normalize_handle(
+            raw_item.get("source_handle")
+            or raw_item.get("author_handle")
+            or raw_item.get("handle")
+            or raw_item.get("username")
+        )
+
+        if handle and handle in twitter_registry:
+            metadata = twitter_registry[handle]
+            source_name = metadata.get("name", source_name)
+            priority = metadata.get("priority", priority)
+            importance_score = safe_int(
+                metadata.get("importance_score", importance_score),
+                importance_score
+            )
+            source_verticals = metadata.get("verticals", []) or []
+            known_source = "True"
+        elif raw_item.get("source_name"):
+            source_name = raw_item["source_name"]
+
+    elif source_type == "pdf":
+        if raw_item.get("source_name"):
+            source_name = raw_item["source_name"]
+
+    if raw_item.get("verticals"):
+        source_verticals = list(raw_item.get("verticals") or [])
+
+    if raw_item.get("priority"):
+        priority = raw_item["priority"]
+
+    if raw_item.get("importance_score") is not None:
+        importance_score = safe_int(raw_item.get("importance_score"), importance_score)
+
+    return {
+        "source_type": source_type,
+        "source_name": source_name or "Unknown",
+        "priority": priority,
+        "importance_score": importance_score,
+        "source_verticals": source_verticals,
+        "source_domain": source_domain,
+        "known_source": known_source
+    }
+
+
+def normalize_content(raw_item):
+    content = (
+        raw_item.get("content")
+        or raw_item.get("text")
+        or raw_item.get("body")
+        or raw_item.get("raw_text")
+        or raw_item.get("content_preview")
+        or ""
+    )
+
+    content = clean_email_text(str(content))
+
+    if content:
+        return content
+
+    return clean_email_text(str(raw_item.get("subject", "")))
+
+
+def source_identity(raw_item):
+    return (
+        raw_item.get("source_id")
+        or raw_item.get("id")
+        or raw_item.get("tweet_id")
+        or raw_item.get("message_id")
+        or raw_item.get("source_file")
+        or raw_item.get("source_name")
+        or "unknown"
+    )
+
+
+def classify_item(raw_item, email_registry, twitter_registry, verticals, watchlist, seen):
+    metadata = enrich_metadata(raw_item, email_registry, twitter_registry)
+
+    subject = str(raw_item.get("subject") or "").strip()
+    content = normalize_content(raw_item)
+
+    if not content.strip():
+        return None
+
+    if any(pattern in subject.lower() for pattern in IGNORE_SUBJECT_PATTERNS):
+        return None
+
+    normalized_content = content.lower().strip()
+    searchable_text = f"{subject} {content}".lower()
 
     item_id = hashlib.sha256(
-        normalized.encode("utf-8")
+        normalized_content.encode("utf-8")
     ).hexdigest()[:16]
+    dedupe_hash = item_id
 
-    if item_id in existing_ids:
-        print(f"Skipped duplicate: {email_path.name}")
-        continue
+    if item_id in seen or dedupe_hash in seen:
+        return None
 
     scores = {}
 
     for vertical, data in verticals.items():
-
-        keywords = data.get("keywords", [])
+        keywords = data.get("keywords", []) or []
         score = 0
 
         for keyword in keywords:
-            score += normalized.count(keyword.lower())
+            score += normalized_content.count(str(keyword).lower())
 
         scores[vertical] = score
 
-    label_verticals = GMAIL_LABEL_VERTICAL_PRIORS.get(
-        metadata["gmail_label"],
-        []
-    )
+    for vertical in metadata["source_verticals"]:
+        scores[vertical] = scores.get(vertical, 0) + 3
+
+    gmail_label = str(raw_item.get("gmail_label", "")).strip()
+    label_verticals = GMAIL_LABEL_VERTICAL_PRIORS.get(gmail_label, [])
 
     for vertical in label_verticals:
         scores[vertical] = scores.get(vertical, 0) + 3
 
     if metadata["known_source"] == "True":
-        for vertical in label_verticals:
+        for vertical in label_verticals or metadata["source_verticals"]:
             scores[vertical] = scores.get(vertical, 0) + 1
 
     watchlist_hits = []
 
     for entity_name, entity_data in watchlist.get("entities", {}).items():
-
-        keywords = entity_data.get("keywords", [])
-        entity_verticals = entity_data.get("verticals", [])
-        score_boost = int(entity_data.get("score_boost", 0))
+        keywords = entity_data.get("keywords", []) or []
+        entity_verticals = entity_data.get("verticals", []) or []
+        score_boost = safe_int(entity_data.get("score_boost", 0), 0)
 
         matched_keywords = [
             keyword for keyword in keywords
-            if keyword.lower() in searchable_text
+            if str(keyword).lower() in searchable_text
         ]
 
         if not matched_keywords:
@@ -183,26 +420,100 @@ for email_path in files:
         if score >= 2
     ]
 
+    importance_score = metadata["importance_score"]
+    priority = metadata["priority"]
+
+    if importance_score >= 8:
+        priority = "high"
+    elif importance_score >= 4 and priority == "low":
+        priority = "medium"
+
     record = {
         "item_id": item_id,
+        "dedupe_hash": dedupe_hash,
         "timestamp": datetime.now(UTC).isoformat(),
-        "source_type": "email_manual",
-        "source_file": str(email_path),
+        "source_type": metadata["source_type"],
+        "source_file": str(raw_item.get("source_file", "")),
+        "source_id": source_identity(raw_item),
         "source_name": metadata["source_name"],
         "source_domain": metadata["source_domain"],
         "known_source": metadata["known_source"],
-        "sender": metadata["sender"],
-        "subject": metadata["subject"],
-        "priority": metadata["priority"],
-        "importance_score": metadata["importance_score"],
-        "gmail_label": metadata["gmail_label"],
+        "sender": raw_item.get("sender", ""),
+        "source_handle": raw_item.get("source_handle", ""),
+        "source_url": raw_item.get("source_url", ""),
+        "subject": subject,
+        "priority": priority,
+        "importance_score": importance_score,
+        "gmail_label": gmail_label,
         "verticals": matched_verticals,
         "scores": scores,
         "watchlist_hits": watchlist_hits,
         "content_preview": content[:200]
     }
 
-    with open(log_path, "a") as f:
-        f.write(json.dumps(record) + "\n")
+    if raw_item.get("pdf_title"):
+        record["pdf_title"] = raw_item["pdf_title"]
 
-    print(f"Processed: {email_path.name} → {matched_verticals}")
+    if raw_item.get("page_count") is not None:
+        record["page_count"] = raw_item["page_count"]
+
+    if raw_item.get("author_handle"):
+        record["author_handle"] = raw_item["author_handle"]
+
+    if raw_item.get("created_at"):
+        record["created_at"] = raw_item["created_at"]
+
+    if raw_item.get("raw_text"):
+        record["raw_text"] = raw_item["raw_text"]
+
+    return record
+
+
+def main():
+    log_path = Path("data/processed/intake_log.jsonl")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.touch(exist_ok=True)
+
+    email_registry = load_email_registry()
+    twitter_registry = load_twitter_registry()
+    verticals = load_verticals()
+    watchlist = load_watchlist()
+    seen = existing_hashes(log_path)
+    raw_items = build_raw_items()
+
+    if not raw_items:
+        print("No intake files found.")
+        raise SystemExit(0)
+
+    records = []
+
+    for raw_item in raw_items:
+        record = classify_item(
+            raw_item,
+            email_registry,
+            twitter_registry,
+            verticals,
+            watchlist,
+            seen
+        )
+
+        if not record:
+            continue
+
+        seen.add(record["item_id"])
+        seen.add(record["dedupe_hash"])
+        records.append(record)
+
+    with log_path.open("a") as f:
+        for record in records:
+            f.write(json.dumps(record) + "\n")
+
+    for record in records:
+        print(
+            f"Processed: {record['source_type']} "
+            f"{record['source_id']} -> {record['verticals']}"
+        )
+
+
+if __name__ == "__main__":
+    main()

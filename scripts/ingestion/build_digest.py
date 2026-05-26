@@ -23,6 +23,8 @@ def get_source(item):
     return (
         item.get("source")
         or item.get("source_name")
+        or item.get("source_handle")
+        or item.get("author_handle")
         or "Unknown"
     )
 

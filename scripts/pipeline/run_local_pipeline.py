@@ -4,7 +4,10 @@ print("\n=== Running local AEON intelligence pipeline ===\n")
 
 steps = [
     ["python3", "scripts/ingestion/classify_email.py"],
-    ["python3", "scripts/digest/generate_digest.py"],
+    ["python3", "scripts/ingestion/summarize_items.py"],
+    ["python3", "scripts/ingestion/cluster_items.py"],
+    ["python3", "scripts/ingestion/extract_alert_candidates.py"],
+    ["python3", "scripts/ingestion/build_digest.py"],
 ]
 
 for step in steps:

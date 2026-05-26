@@ -381,6 +381,46 @@ Set the secret → channel activates. No code changes needed.
 **Slack:** api.slack.com → Create App → Incoming Webhooks → install → copy URL. Inbound: add `channels:history`, `reactions:write` scopes → copy bot token + channel ID.  
 **Email:** sendgrid.com/settings/api_keys → Create API Key (Mail Send permission) → add as `SENDGRID_API_KEY`. Set `NOTIFY_EMAIL_TO` to your recipient address. Optional: set repository variable `NOTIFY_EMAIL_FROM` (default: `aeon@notifications.aeon.bot`) and `NOTIFY_EMAIL_SUBJECT_PREFIX` (default: `[Aeon]`).
 
+## Local Ingestion
+
+The deterministic intake pipeline now accepts local PDFs and manual Twitter JSONL exports without any OCR, paid X API, embeddings, or LLM calls.
+
+1. Install the lightweight text dependencies:
+
+```bash
+pip install pypdf pyyaml beautifulsoup4
+```
+
+2. Extract a local PDF into normalized intake JSONL:
+
+```bash
+python3 scripts/ingestion/ingest_pdf.py /path/to/report.pdf
+```
+
+3. Normalize a manual Twitter JSONL export:
+
+```bash
+python3 scripts/ingestion/fetch_twitter.py /path/to/manual_tweets.jsonl
+```
+
+4. Run the full deterministic pipeline:
+
+```bash
+python3 scripts/pipeline/run_local_pipeline.py
+```
+
+That pipeline writes the shared processed log at `data/processed/intake_log.jsonl`, then reuses it for summarization, clustering, alert-candidate extraction, and the daily digest that can be posted to Slack.
+
+If you want to run the steps manually instead of the helper pipeline:
+
+```bash
+python3 scripts/ingestion/classify_email.py
+python3 scripts/ingestion/summarize_items.py
+python3 scripts/ingestion/cluster_items.py
+python3 scripts/ingestion/extract_alert_candidates.py
+python3 scripts/ingestion/build_digest.py
+```
+
 ### Telegram instant mode (optional)
 
 Default polling has up to 5-min delay. Deploy a ~20-line Cloudflare Worker as a webhook for ~1s response time. See [`docs/telegram-instant.md`](docs/telegram-instant.md) for the Worker code and setup.
