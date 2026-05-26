@@ -1,0 +1,2 @@
+{"id":"tweet-1","source_handle":"aaronjmars","text":"Manual JSONL fixture tweet one for AEON."}
+{"id_str":"tweet-2","user":{"screen_name":"aaronjmars"},"full_text":"Manual JSONL fixture tweet two for AEON ingestion."}

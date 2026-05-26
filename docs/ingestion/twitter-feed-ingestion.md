@@ -39,6 +39,15 @@ For a quick verification run:
 bash scripts/ingestion/smoke_twitter_feeds.sh
 ```
 
+## Fixture Tests
+
+The deterministic fixture tests cover both manual JSONL ingestion and `--feeds` parsing without any network calls:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py'
+python3 -m py_compile scripts/ingestion/fetch_twitter.py
+```
+
 ## What AEON Writes
 
 Feed items are normalized into the same tweet-shaped intake schema as manual JSONL ingestion:

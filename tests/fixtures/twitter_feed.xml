@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>AEON Twitter Feed Fixture</title>
+  <id>urn:uuid:aeon-twitter-feed-fixture</id>
+  <updated>2026-05-01T12:00:00Z</updated>
+  <entry>
+    <id>tag:x.com,2026:status-1001</id>
+    <title>Fixture title one</title>
+    <summary>Short summary one</summary>
+    <content type="html">This is the first feed item body with more detail.</content>
+    <link rel="alternate" href="https://x.com/aaronjmars/status/1001" />
+    <published>2026-05-01T12:00:00Z</published>
+  </entry>
+  <entry>
+    <id>tag:x.com,2026:status-1002</id>
+    <title>Second feed item title is longer than summary</title>
+    <summary>Short summary two</summary>
+    <content type="html">Second body.</content>
+    <link rel="alternate" href="https://x.com/aaronjmars/status/1002" />
+    <updated>2026-05-01T13:00:00Z</updated>
+  </entry>
+</feed>
