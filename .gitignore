@@ -72,4 +72,4 @@ data/processed/*
 data/events/
 data/hermes/
 data/outbox/
-data/metadata/email_sources.json
+data/metadata/email_sources.jsondata/metadata/email_sources.json
