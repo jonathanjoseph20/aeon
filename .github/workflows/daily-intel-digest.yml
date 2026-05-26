@@ -61,3 +61,18 @@ jobs:
           else
             echo "No digest was generated."
           fi
+
+      - name: Show Slack payload preview
+        run: |
+          if [ -d data/outbox/slack/daily-intel-digest ]; then
+            latest_payload="$(find data/outbox/slack/daily-intel-digest -maxdepth 1 -name '*.json' -print | sort | tail -n 1)"
+          else
+            latest_payload=""
+          fi
+
+          if [ -n "${latest_payload:-}" ] && [ -f "$latest_payload" ]; then
+            echo "Generated Slack payload:"
+            cat "$latest_payload"
+          else
+            echo "No Slack payload was generated."
+          fi

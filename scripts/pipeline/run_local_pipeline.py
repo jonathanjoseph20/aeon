@@ -138,6 +138,10 @@ def build_pipeline_steps(
                 "label": "Build digest",
                 "command": build_command("build_digest.py"),
             },
+            {
+                "label": "Build Slack-safe digest payload",
+                "command": build_command("build_slack_digest_payload.py"),
+            },
         ]
     )
 

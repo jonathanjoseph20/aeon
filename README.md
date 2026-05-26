@@ -410,6 +410,7 @@ python3 scripts/pipeline/run_local_pipeline.py
 ```
 
 That pipeline writes the shared processed log at `data/processed/intake_log.jsonl`, then reuses it for summarization, clustering, alert-candidate extraction, Hermes promotion, and the daily digest.
+It also writes a Slack-safe outbox payload at `data/outbox/slack/daily-intel-digest/YYYY-MM-DD.json` for later operational use.
 
 See [`docs/ingestion/daily-pipeline.md`](docs/ingestion/daily-pipeline.md) for the local command, the dry-run mode, and the scheduled GitHub Actions workflow.
 
@@ -422,6 +423,7 @@ python3 scripts/ingestion/cluster_items.py
 python3 scripts/ingestion/extract_alert_candidates.py
 python3 scripts/ingestion/promote_to_hermes.py
 python3 scripts/ingestion/build_digest.py
+python3 scripts/ingestion/build_slack_digest_payload.py
 ```
 
 ### Telegram instant mode (optional)

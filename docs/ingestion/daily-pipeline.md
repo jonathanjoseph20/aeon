@@ -1,6 +1,6 @@
 # AEON Daily Pipeline
 
-AEON's daily pipeline is deterministic-first and avoids LLM calls by default. It ingests configured inputs, classifies them, adds summaries and clusters, extracts alert candidates, promotes high-signal items to Hermes append-only logs, and builds the daily digest.
+AEON's daily pipeline is deterministic-first and avoids LLM calls by default. It ingests configured inputs, classifies them, adds summaries and clusters, extracts alert candidates, promotes high-signal items to Hermes append-only logs, builds the daily digest, and emits a Slack-safe outbox payload.
 
 ## Local Run
 
@@ -30,6 +30,15 @@ The pipeline writes these append-only outputs:
 - `data/events/promote_to_hermes/YYYY-MM-DD.jsonl`
 - `data/hermes/promoted/YYYY-MM-DD.jsonl`
 - `data/processed/daily_digest.md`
+- `data/outbox/slack/daily-intel-digest/YYYY-MM-DD.json`
+
+The Slack payload is deterministic and is only written to the local outbox. AEON does not post to Slack directly during the daily pipeline.
+
+To inspect the payload without writing the artifact, run:
+
+```bash
+python3 scripts/ingestion/build_slack_digest_payload.py --preview
+```
 
 Raw intake data stays out of git because the intake folders are ignored.
 
@@ -45,3 +54,4 @@ It supports both:
 The workflow restores Gmail secrets when they are provided, then runs the same local pipeline script. Twitter feed failures are logged by the ingestion script and do not fail the job.
 
 The workflow does not call Hermes APIs and does not post to Slack directly.
+It does produce the Slack-safe outbox payload artifact so it can be inspected or forwarded later by an operator.

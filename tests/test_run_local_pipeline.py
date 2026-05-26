@@ -75,6 +75,7 @@ class RunLocalPipelineTests(unittest.TestCase):
                     "Extract alert candidates",
                     "Promote high-signal items to Hermes",
                     "Build digest",
+                    "Build Slack-safe digest payload",
                 ],
             )
 
@@ -101,6 +102,7 @@ class RunLocalPipelineTests(unittest.TestCase):
                     "Extract alert candidates",
                     "Promote high-signal items to Hermes",
                     "Build digest",
+                    "Build Slack-safe digest payload",
                 ],
             )
             self.assertEqual(
