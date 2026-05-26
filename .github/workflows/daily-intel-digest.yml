@@ -1,4 +1,5 @@
-name: Daily Intel Digest
+name: AEON Daily Pipeline
+run-name: "aeon-daily-pipeline"
 
 on:
   workflow_dispatch:
@@ -7,6 +8,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: aeon-daily-pipeline
+  cancel-in-progress: false
 
 jobs:
   digest:
@@ -23,68 +28,36 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install google-api-python-client
-          pip install google-auth-httplib2
-          pip install google-auth-oauthlib
-          pip install beautifulsoup4
-          pip install pyyaml
+          python3 -m pip install --upgrade pip
+          python3 -m pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib beautifulsoup4 pyyaml pypdf
 
       - name: Restore Gmail token
         env:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
         run: |
           mkdir -p credentials
-          echo "$GMAIL_TOKEN_JSON" > credentials/token.json
+          if [ -n "${GMAIL_TOKEN_JSON:-}" ]; then
+            printf '%s' "$GMAIL_TOKEN_JSON" > credentials/token.json
+          fi
 
       - name: Restore Gmail credentials
         env:
           GMAIL_CREDENTIALS_JSON: ${{ secrets.GMAIL_CREDENTIALS_JSON }}
         run: |
-          echo "$GMAIL_CREDENTIALS_JSON" > credentials/gmail_credentials.json
-
-      - name: Fetch Gmail intake
-        run: |
-          python3 scripts/ingestion/fetch_gmail.py
-
-      - name: Promote source candidates
-        run: |
-          python3 scripts/ingestion/promote_source_candidates.py
-
-      - name: Classify intake
-        run: |
-          python3 scripts/ingestion/classify_email.py
-
-      - name: Summarize items
-        run: |
-          python3 scripts/ingestion/summarize_items.py
-
-      - name: Cluster items
-        run: |
-          python3 scripts/ingestion/cluster_items.py
-
-      - name: Build digest file
-        run: |
-          mkdir -p data/processed
-          python3 scripts/ingestion/build_digest.py
-
-      - name: Build digest preview
-        run: |
-          echo "Generated digest:"
-          cat data/processed/daily_digest.md
-
-      - name: Send digest to Slack
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
-            echo "No Slack webhook configured."
-            exit 0
+          mkdir -p credentials
+          if [ -n "${GMAIL_CREDENTIALS_JSON:-}" ]; then
+            printf '%s' "$GMAIL_CREDENTIALS_JSON" > credentials/gmail_credentials.json
           fi
 
-          DIGEST="$(cat data/processed/daily_digest.md)"
+      - name: Run deterministic AEON pipeline
+        run: |
+          python3 scripts/pipeline/run_local_pipeline.py
 
-          jq -n --arg text "$DIGEST" '{text: $text}' > payload.json
-
-          curl -sf -X POST "$SLACK_WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -d @payload.json > /dev/null
+      - name: Show digest preview
+        run: |
+          if [ -f data/processed/daily_digest.md ]; then
+            echo "Generated digest:"
+            cat data/processed/daily_digest.md
+          else
+            echo "No digest was generated."
+          fi

@@ -409,7 +409,9 @@ python3 scripts/ingestion/fetch_twitter.py /path/to/manual_tweets.jsonl
 python3 scripts/pipeline/run_local_pipeline.py
 ```
 
-That pipeline writes the shared processed log at `data/processed/intake_log.jsonl`, then reuses it for summarization, clustering, alert-candidate extraction, and the daily digest that can be posted to Slack.
+That pipeline writes the shared processed log at `data/processed/intake_log.jsonl`, then reuses it for summarization, clustering, alert-candidate extraction, Hermes promotion, and the daily digest.
+
+See [`docs/ingestion/daily-pipeline.md`](docs/ingestion/daily-pipeline.md) for the local command, the dry-run mode, and the scheduled GitHub Actions workflow.
 
 If you want to run the steps manually instead of the helper pipeline:
 
@@ -418,6 +420,7 @@ python3 scripts/ingestion/classify_email.py
 python3 scripts/ingestion/summarize_items.py
 python3 scripts/ingestion/cluster_items.py
 python3 scripts/ingestion/extract_alert_candidates.py
+python3 scripts/ingestion/promote_to_hermes.py
 python3 scripts/ingestion/build_digest.py
 ```
 
