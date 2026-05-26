@@ -68,3 +68,8 @@ data/processed/*
 !data/intake/twitter/.gitkeep
 !data/processed/pdf/.gitkeep
 !data/processed/twitter/.gitkeep
+
+data/events/
+data/hermes/
+data/outbox/
+data/metadata/email_sources.json
