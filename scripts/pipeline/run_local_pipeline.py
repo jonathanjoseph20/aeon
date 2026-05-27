@@ -132,6 +132,10 @@ def build_pipeline_steps(
                 "command": build_command("build_entity_summary.py"),
             },
             {
+                "label": "Build narrative summary",
+                "command": build_command("build_narrative_summary.py"),
+            },
+            {
                 "label": "Build digest",
                 "command": build_command("build_digest.py"),
             },

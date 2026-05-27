@@ -1,8 +1,21 @@
 import argparse
 import json
 import re
+import sys
 from datetime import datetime, UTC
 from pathlib import Path
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[1]
+
+for path in (REPO_ROOT, SCRIPT_DIR):
+    path_str = str(path)
+
+    if path_str not in sys.path:
+        sys.path.append(path_str)
+
+from build_narrative_summary import build_narrative_summary
 
 
 DEFAULT_DIGEST_PATH = Path("data/processed/daily_digest.md")
@@ -268,6 +281,14 @@ def build_text_payload(payload):
     if entity_parts:
         parts.append(" | ".join(entity_parts))
 
+    narrative_parts = []
+
+    for group in payload.get("narrative_section_summaries", [])[:3]:
+        narrative_parts.append(group["summary"])
+
+    if narrative_parts:
+        parts.append("Top Narratives: " + " | ".join(narrative_parts))
+
     return truncate_text(" | ".join(parts), 2800)
 
 
@@ -300,6 +321,39 @@ def summarize_entity_group(group):
     }
 
 
+def summarize_narrative_group(group):
+    items = group.get("items", [])
+    item_count = len(items)
+
+    if not items:
+        return {
+            "narrative": clean_text(group.get("narrative_name")),
+            "item_count": 0,
+            "summary": "No narrative signals available.",
+        }
+
+    top_item = items[0]
+    summary = (
+        f"{top_item.get('narrative_name', 'Unknown')}: "
+        f"{top_item.get('trend_status', 'stable')}, "
+        f"{top_item.get('source_count', 0)} sources"
+    )
+
+    if top_item.get("promotion_count", 0):
+        summary = f"{summary}, {top_item.get('promotion_count', 0)} promotions"
+    elif top_item.get("alert_count", 0):
+        summary = f"{summary}, {top_item.get('alert_count', 0)} alerts"
+
+    if item_count > 1:
+        summary = f"{summary}; +{item_count - 1} more"
+
+    return {
+        "narrative": clean_text(top_item.get("narrative_name")),
+        "item_count": item_count,
+        "summary": truncate_text(summary, 180),
+    }
+
+
 def build_slack_digest_payload(
     digest_path=DEFAULT_DIGEST_PATH,
     input_log_path=DEFAULT_INPUT_LOG,
@@ -307,6 +361,8 @@ def build_slack_digest_payload(
     hermes_dir=DEFAULT_HERMES_DIR,
     outbox_dir=DEFAULT_OUTBOX_DIR,
     run_date="",
+    entity_summary_path=None,
+    narrative_summary_path=None,
 ):
     digest_path = Path(digest_path)
     input_log_path = Path(input_log_path)
@@ -314,9 +370,27 @@ def build_slack_digest_payload(
     hermes_dir = Path(hermes_dir)
     outbox_dir = Path(outbox_dir)
 
+    if entity_summary_path is None:
+        entity_summary_path = input_log_path.parent / "entity_summary.json"
+
+    if narrative_summary_path is None:
+        narrative_summary_path = input_log_path.parent / "narrative_summary.json"
+
+    entity_summary_path = Path(entity_summary_path)
+    narrative_summary_path = Path(narrative_summary_path)
+
     digest = parse_digest(digest_path)
     digest_date = parse_digest_date(digest["generated_at"], run_date or "")
     hermes_path = hermes_dir / f"{digest_date}.jsonl"
+
+    if not narrative_summary_path.exists():
+        build_narrative_summary(
+            log_path=input_log_path,
+            entity_summary_path=entity_summary_path,
+            output_path=narrative_summary_path,
+            alerts_path=alerts_path,
+            hermes_dir=hermes_dir,
+        )
 
     grouped_vertical_summaries = [
         summarize_vertical_group(group)
@@ -325,6 +399,20 @@ def build_slack_digest_payload(
     entity_section_summaries = [
         summarize_entity_group(group)
         for group in digest["entity_sections"]
+    ]
+    narrative_data = (
+        json.loads(narrative_summary_path.read_text(encoding="utf-8"))
+        if narrative_summary_path.exists()
+        else {"top_narratives": []}
+    )
+    narrative_section_summaries = [
+        summarize_narrative_group(
+            {
+                "narrative_name": narrative.get("narrative_name"),
+                "items": [narrative],
+            }
+        )
+        for narrative in narrative_data.get("top_narratives", [])
     ]
 
     payload = {
@@ -335,6 +423,7 @@ def build_slack_digest_payload(
         "promoted_to_hermes_count": count_jsonl_records(hermes_path),
         "grouped_vertical_summaries": grouped_vertical_summaries,
         "entity_section_summaries": entity_section_summaries,
+        "narrative_section_summaries": narrative_section_summaries,
         "full_digest_path": str(digest_path) if digest_path.exists() else None,
     }
     total_intake_items = payload["total_intake_items"]

@@ -991,6 +991,7 @@ def build_entity_summary(
                 "entity_name": entity["entity_name"],
                 "entity_type": entity.get("entity_type", "unknown"),
                 "entity_confidence": entity.get("entity_confidence", 0.0),
+                "matched_alias": entity.get("matched_alias", entity["entity_name"]),
                 "subject": clean_text(item.get("subject")),
                 "timestamp": item_ts.isoformat() if item_ts else "",
                 "importance_score": importance_score,
