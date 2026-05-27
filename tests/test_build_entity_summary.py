@@ -140,6 +140,107 @@ class BuildEntitySummaryTests(unittest.TestCase):
             self.assertEqual(most_mentioned["entity_name"], "OpenAI")
             self.assertEqual(most_mentioned["mention_count"], 4)
 
+    def test_suppresses_common_words_and_keeps_configured_entities(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir = Path(temp_dir)
+            log_path = temp_dir / "intake_log.jsonl"
+            entity_summary_path = temp_dir / "entity_summary.json"
+            entities_dir = temp_dir / "entities"
+
+            noisy_text = "RT This It We If The A An I You They He She Today Now Here"
+
+            write_jsonl(
+                log_path,
+                [
+                    {
+                        "item_id": "alpha-1",
+                        "source_type": "twitter",
+                        "source_name": "0xSammy",
+                        "subject": noisy_text,
+                        "content_preview": (
+                            f"{noisy_text} model routing AI VC BTC"
+                        ),
+                        "importance_score": 2,
+                        "timestamp": "2026-05-24T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "beta-1",
+                        "source_type": "newsletter",
+                        "source_name": "beta note",
+                        "subject": noisy_text,
+                        "content_preview": (
+                            f"{noisy_text} Base chain and real world assets RWA ZK"
+                        ),
+                        "importance_score": 6,
+                        "timestamp": "2026-05-25T10:00:00Z",
+                        "verticals": ["Crypto"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "gamma-1",
+                        "source_type": "pdf",
+                        "source_name": "gamma memo",
+                        "subject": noisy_text,
+                        "content_preview": (
+                            f"{noisy_text} OpenAI ETH VC model routing"
+                        ),
+                        "importance_score": 9,
+                        "timestamp": "2026-05-26T10:00:00Z",
+                        "verticals": ["AI", "Crypto"],
+                        "digest_enabled": True,
+                    },
+                ],
+            )
+
+            summary = build_entity_summary.build_entity_summary(
+                log_path=log_path,
+                output_path=entity_summary_path,
+                entity_dir=entities_dir,
+            )
+
+            entity_names = {entity["entity_name"] for entity in summary["entities"]}
+            top_entity_names = {
+                entity["entity_name"]
+                for section_name in (
+                    "top_emerging_entities",
+                    "most_mentioned_entities",
+                    "cross_source_entities",
+                )
+                for entity in summary[section_name]
+            }
+
+            bad_entities = {
+                "RT",
+                "This",
+                "It",
+                "We",
+                "If",
+                "The",
+                "A",
+                "An",
+                "I",
+                "You",
+                "They",
+                "He",
+                "She",
+                "Today",
+                "Now",
+                "Here",
+            }
+
+            self.assertTrue(bad_entities.isdisjoint(entity_names))
+            self.assertTrue(bad_entities.isdisjoint(top_entity_names))
+            self.assertIn("OpenRouter", entity_names)
+            self.assertIn("0xSammy", entity_names)
+            self.assertIn("AI", entity_names)
+            self.assertIn("VC", entity_names)
+            self.assertIn("BTC", entity_names)
+            self.assertIn("ETH", entity_names)
+            self.assertIn("RWA", entity_names)
+            self.assertIn("ZK", entity_names)
+
 
 if __name__ == "__main__":
     unittest.main()

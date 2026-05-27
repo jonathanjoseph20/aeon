@@ -5,10 +5,14 @@ from collections import Counter, defaultdict
 from datetime import UTC, datetime, date, time
 from pathlib import Path
 
+import yaml
+
 
 DEFAULT_LOG_PATH = Path("data/processed/intake_log.jsonl")
 DEFAULT_OUTPUT_PATH = Path("data/processed/entity_summary.json")
 DEFAULT_ENTITY_DIR = Path("data/processed/entities")
+DEFAULT_WATCHLIST_PATH = Path("config/watchlist.yml")
+DEFAULT_SOURCES_PATH = Path("config/sources.yml")
 
 ALLOWED_SOURCE_TYPES = {"twitter", "pdf", "newsletter"}
 ENTITY_SECTION_TITLES = {
@@ -20,9 +24,7 @@ ENTITY_SECTION_TITLES = {
 TOKEN_RE = re.compile(r"[#$@]?[A-Za-z0-9][A-Za-z0-9&.'/_:-]*")
 TRAILING_PUNCT_RE = re.compile(r"^[\W_]+|[\W_]+$")
 GENERIC_STOPWORDS = {
-    "a",
     "about",
-    "ai",
     "and",
     "article",
     "brief",
@@ -54,6 +56,32 @@ GENERIC_STOPWORDS = {
     "twitter",
     "update",
     "weekly",
+}
+ENTITY_SUPPRESSION_WORDS = GENERIC_STOPWORDS | {
+    "a",
+    "an",
+    "he",
+    "here",
+    "if",
+    "i",
+    "it",
+    "now",
+    "rt",
+    "she",
+    "the",
+    "they",
+    "this",
+    "today",
+    "we",
+    "you",
+}
+SHORT_ENTITY_ALLOWLIST = {
+    "ai": "AI",
+    "btc": "BTC",
+    "eth": "ETH",
+    "rwa": "RWA",
+    "vc": "VC",
+    "zk": "ZK",
 }
 CONNECTORS = {"of", "the", "in", "on", "at", "de", "la", "van", "von"}
 LEADING_ARTICLES = {"the", "a", "an"}
@@ -211,6 +239,12 @@ def clean_token(token):
 
     token = token.lstrip("@#$")
     token = TRAILING_PUNCT_RE.sub("", token)
+
+    lowered = token.lower()
+
+    if lowered in SHORT_ENTITY_ALLOWLIST:
+        return SHORT_ENTITY_ALLOWLIST[lowered]
+
     return token.strip()
 
 
@@ -222,7 +256,13 @@ def token_is_entity(token):
 
     lowered = token.lower()
 
-    if lowered in GENERIC_STOPWORDS:
+    if lowered in SHORT_ENTITY_ALLOWLIST:
+        return True, 2.0
+
+    if len(token) < 3:
+        return False, 0
+
+    if lowered in ENTITY_SUPPRESSION_WORDS:
         return False, 0
 
     if lowered in CONNECTORS:
@@ -251,20 +291,181 @@ def entity_key(phrase):
     return re.sub(r"[^a-z0-9]+", " ", phrase.lower()).strip()
 
 
-def extract_entities(text):
+def load_yaml_file(path):
+    path = Path(path)
+
+    if not path.exists():
+        return {}
+
+    with path.open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def build_entity_pattern(alias):
+    alias = clean_token(alias)
+
+    if not alias:
+        return None
+
+    return re.compile(
+        rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])",
+        re.IGNORECASE,
+    )
+
+
+def load_configured_entities(watchlist_path=DEFAULT_WATCHLIST_PATH, sources_path=DEFAULT_SOURCES_PATH):
+    configured_entities = {}
+
+    watchlist_data = load_yaml_file(watchlist_path)
+    for entity_name, entity_data in (watchlist_data.get("entities") or {}).items():
+        entity_name = clean_text(entity_name)
+
+        if not entity_name:
+            continue
+
+        entry = configured_entities.setdefault(
+            entity_key(entity_name),
+            {
+                "entity_name": entity_name,
+                "priority": 0,
+                "patterns": [],
+            },
+        )
+        entry["entity_name"] = entity_name
+        entry["priority"] = max(entry["priority"], 3)
+
+        for field_name in ("token_match", "phrase_match"):
+            aliases = entity_data.get(field_name) or []
+
+            if not isinstance(aliases, list):
+                aliases = [aliases]
+
+            for alias in aliases:
+                pattern = build_entity_pattern(alias)
+
+                if pattern is not None:
+                    entry["patterns"].append(pattern)
+
+        regexes = entity_data.get("regex_match") or []
+
+        if not isinstance(regexes, list):
+            regexes = [regexes]
+
+        for regex in regexes:
+            try:
+                entry["patterns"].append(re.compile(regex, re.IGNORECASE))
+            except re.error:
+                continue
+
+    sources_data = load_yaml_file(sources_path)
+    for source_entry in sources_data.get("sources") or []:
+        source_name = clean_text(source_entry.get("source_name"))
+
+        if not source_name:
+            continue
+
+        entry = configured_entities.setdefault(
+            entity_key(source_name),
+            {
+                "entity_name": source_name,
+                "priority": 0,
+                "patterns": [],
+            },
+        )
+
+        entry["entity_name"] = source_name
+        entry["priority"] = max(entry["priority"], 2)
+
+        pattern = build_entity_pattern(source_name)
+
+        if pattern is not None:
+            entry["patterns"].append(pattern)
+
+    return list(configured_entities.values())
+
+
+def candidate_is_valid(phrase):
+    phrase = clean_text(phrase)
+
+    if not phrase:
+        return False
+
+    lowered = phrase.lower()
+
+    if lowered in SHORT_ENTITY_ALLOWLIST:
+        return True
+
+    if len(phrase) < 3:
+        return False
+
+    if lowered in ENTITY_SUPPRESSION_WORDS:
+        return False
+
+    return True
+
+
+def extract_configured_entities(text, configured_entities):
+    candidates = []
+
+    for spec in configured_entities:
+        entity_name = spec["entity_name"]
+        entity_key_value = entity_key(entity_name)
+        best_match_start = None
+
+        for pattern in spec["patterns"]:
+            match = pattern.search(text)
+
+            if match is None:
+                continue
+
+            match_start = match.start()
+
+            if best_match_start is None or match_start < best_match_start:
+                best_match_start = match_start
+
+        if best_match_start is None:
+            continue
+
+        if not candidate_is_valid(entity_name):
+            continue
+
+        candidates.append(
+            {
+                "entity_key": entity_key_value,
+                "entity_name": entity_name,
+                "position": best_match_start,
+                "priority": spec["priority"],
+            }
+        )
+
+    return candidates
+
+
+def extract_entities(text, configured_entities=None):
     text = clean_text(text)
 
     if not text:
         return []
 
+    if configured_entities is None:
+        configured_entities = load_configured_entities()
+
     tokens = [match.group(0) for match in TOKEN_RE.finditer(text)]
     candidates = []
+
+    candidates.extend(extract_configured_entities(text, configured_entities))
     index = 0
 
     while index < len(tokens):
         token = tokens[index]
         is_entity, token_score = token_is_entity(token)
         lowered = clean_token(token).lower()
+
+        if lowered in SHORT_ENTITY_ALLOWLIST:
+            canonical_token = clean_token(token)
+            candidates.append((entity_key(canonical_token), canonical_token, index))
+            index += 1
+            continue
 
         if lowered in LEADING_ARTICLES and index + 1 < len(tokens):
             next_is_entity, _ = token_is_entity(tokens[index + 1])
@@ -278,6 +479,9 @@ def extract_entities(text):
                     next_clean = clean_token(next_token).lower()
                     next_is_entity, _ = token_is_entity(next_token)
 
+                    if next_clean in SHORT_ENTITY_ALLOWLIST:
+                        break
+
                     if next_is_entity or next_clean in CONNECTORS:
                         end += 1
                         continue
@@ -288,7 +492,11 @@ def extract_entities(text):
                 phrase = canonicalize_phrase(phrase_tokens)
                 key = entity_key(phrase)
 
-                if phrase and key and key not in GENERIC_STOPWORDS:
+                if phrase and key and candidate_is_valid(phrase):
+                    if len(phrase_tokens) == 2 and clean_token(phrase_tokens[1]).lower() in SHORT_ENTITY_ALLOWLIST:
+                        index += 1
+                        continue
+
                     candidates.append((key, phrase, start))
 
                 index = end
@@ -308,6 +516,9 @@ def extract_entities(text):
             next_clean = clean_token(next_token).lower()
             next_is_entity, next_score = token_is_entity(next_token)
 
+            if next_clean in SHORT_ENTITY_ALLOWLIST:
+                break
+
             if next_is_entity:
                 strong_tokens += 1
                 score += next_score
@@ -324,23 +535,32 @@ def extract_entities(text):
         phrase_tokens = tokens[start:end]
         phrase = canonicalize_phrase(phrase_tokens)
         key = entity_key(phrase)
-        cleaned_phrase = phrase.lower()
 
-        if (
-            phrase
-            and key
-            and cleaned_phrase not in GENERIC_STOPWORDS
-            and (strong_tokens >= 2 or score >= 1.3)
-        ):
+        if phrase and key and candidate_is_valid(phrase) and (strong_tokens >= 2 or score >= 1.3):
             candidates.append((key, phrase, start))
 
         index = end if end > index else index + 1
 
     deduped = {}
 
-    for key, phrase, start in sorted(candidates, key=lambda entry: entry[2]):
-        if key not in deduped:
-            deduped[key] = (phrase, start)
+    for candidate in sorted(
+        candidates,
+        key=lambda entry: (
+            -entry.get("priority", 1) if isinstance(entry, dict) else 0,
+            entry[2] if isinstance(entry, tuple) else entry["position"],
+        ),
+    ):
+        if isinstance(candidate, dict):
+            key = candidate["entity_key"]
+            value = (candidate["entity_name"], candidate["position"], candidate["priority"])
+        else:
+            key, phrase, start = candidate
+            value = (phrase, start, 1)
+
+        existing = deduped.get(key)
+
+        if existing is None or value[2] > existing[2] or (value[2] == existing[2] and value[1] < existing[1]):
+            deduped[key] = value
 
     return [
         {
@@ -384,7 +604,13 @@ def load_items(log_path):
     return items
 
 
-def build_entity_summary(log_path=DEFAULT_LOG_PATH, output_path=DEFAULT_OUTPUT_PATH, entity_dir=DEFAULT_ENTITY_DIR):
+def build_entity_summary(
+    log_path=DEFAULT_LOG_PATH,
+    output_path=DEFAULT_OUTPUT_PATH,
+    entity_dir=DEFAULT_ENTITY_DIR,
+    watchlist_path=DEFAULT_WATCHLIST_PATH,
+    sources_path=DEFAULT_SOURCES_PATH,
+):
     log_path = Path(log_path)
     output_path = Path(output_path)
     entity_dir = Path(entity_dir)
@@ -393,6 +619,7 @@ def build_entity_summary(log_path=DEFAULT_LOG_PATH, output_path=DEFAULT_OUTPUT_P
 
     items = load_items(log_path)
     aggregates = {}
+    configured_entities = load_configured_entities(watchlist_path, sources_path)
 
     for fallback_index, item in enumerate(items):
         if not is_digest_enabled(item):
@@ -404,7 +631,7 @@ def build_entity_summary(log_path=DEFAULT_LOG_PATH, output_path=DEFAULT_OUTPUT_P
             continue
 
         text = extract_item_text(item)
-        entities = extract_entities(text)
+        entities = extract_entities(text, configured_entities=configured_entities)
 
         if not entities:
             continue
