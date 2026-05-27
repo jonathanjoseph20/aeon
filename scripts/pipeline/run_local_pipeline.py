@@ -13,6 +13,7 @@ from source_config import load_source_entries, normalize_source_type
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INGESTION_DIR = REPO_ROOT / "scripts" / "ingestion"
 HERMES_DIR = REPO_ROOT / "scripts" / "hermes"
+SLACK_DIR = REPO_ROOT / "scripts" / "slack"
 DEFAULT_SOURCES_FILE = REPO_ROOT / "config" / "sources.yml"
 DEFAULT_PDF_INPUT_DIR = REPO_ROOT / "data" / "intake" / "pdf"
 DEFAULT_GMAIL_TOKEN = REPO_ROOT / "credentials" / "token.json"
@@ -60,6 +61,14 @@ def build_hermes_command(script_name, *args):
     return [
         sys.executable,
         str(HERMES_DIR / script_name),
+        *[str(arg) for arg in args],
+    ]
+
+
+def build_slack_command(script_name, *args):
+    return [
+        sys.executable,
+        str(SLACK_DIR / script_name),
         *[str(arg) for arg in args],
     ]
 
@@ -155,6 +164,10 @@ def build_pipeline_steps(
             {
                 "label": "Build Slack-safe digest payload",
                 "command": build_command("build_slack_digest_payload.py"),
+            },
+            {
+                "label": "Build Slack command-center payload",
+                "command": build_slack_command("build_command_payload.py"),
             },
         ]
     )

@@ -79,6 +79,7 @@ class RunLocalPipelineTests(unittest.TestCase):
                     "Build Hermes synthesis",
                     "Build digest",
                     "Build Slack-safe digest payload",
+                    "Build Slack command-center payload",
                 ],
             )
 
@@ -109,6 +110,7 @@ class RunLocalPipelineTests(unittest.TestCase):
                     "Build Hermes synthesis",
                     "Build digest",
                     "Build Slack-safe digest payload",
+                    "Build Slack command-center payload",
                 ],
             )
             self.assertEqual(
