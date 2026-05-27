@@ -12,6 +12,7 @@ from source_config import load_source_entries, normalize_source_type
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INGESTION_DIR = REPO_ROOT / "scripts" / "ingestion"
+HERMES_DIR = REPO_ROOT / "scripts" / "hermes"
 DEFAULT_SOURCES_FILE = REPO_ROOT / "config" / "sources.yml"
 DEFAULT_PDF_INPUT_DIR = REPO_ROOT / "data" / "intake" / "pdf"
 DEFAULT_GMAIL_TOKEN = REPO_ROOT / "credentials" / "token.json"
@@ -51,6 +52,14 @@ def build_command(script_name, *args):
     return [
         sys.executable,
         str(INGESTION_DIR / script_name),
+        *[str(arg) for arg in args],
+    ]
+
+
+def build_hermes_command(script_name, *args):
+    return [
+        sys.executable,
+        str(HERMES_DIR / script_name),
         *[str(arg) for arg in args],
     ]
 
@@ -134,6 +143,10 @@ def build_pipeline_steps(
             {
                 "label": "Build narrative summary",
                 "command": build_command("build_narrative_summary.py"),
+            },
+            {
+                "label": "Build Hermes synthesis",
+                "command": build_hermes_command("build_synthesis.py"),
             },
             {
                 "label": "Build digest",
