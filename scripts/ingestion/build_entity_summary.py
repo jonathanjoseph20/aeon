@@ -13,6 +13,8 @@ DEFAULT_OUTPUT_PATH = Path("data/processed/entity_summary.json")
 DEFAULT_ENTITY_DIR = Path("data/processed/entities")
 DEFAULT_WATCHLIST_PATH = Path("config/watchlist.yml")
 DEFAULT_SOURCES_PATH = Path("config/sources.yml")
+MAX_ENTITY_FILENAME_LENGTH = 120
+ENTITY_FILENAME_EXTENSION = ".json"
 
 ALLOWED_SOURCE_TYPES = {"twitter", "pdf", "newsletter"}
 ENTITY_SECTION_TITLES = {
@@ -900,14 +902,23 @@ def classify_trend(mentions):
     return "stable", trend_score
 
 
-def entity_file_name(entity):
-    digest = hashlib.sha256(entity["entity_key"].encode("utf-8")).hexdigest()[:16]
-    safe_name = re.sub(r"[^a-z0-9]+", "-", entity["entity_key"].lower()).strip("-")
+def build_entity_filename(entity_key):
+    normalized_key = clean_text(entity_key)
+    digest = hashlib.sha256(normalized_key.lower().encode("utf-8")).hexdigest()[:16]
+    safe_name = re.sub(r"[^a-z0-9]+", "-", normalized_key.lower()).strip("-")
 
     if not safe_name:
         safe_name = "entity"
 
-    return f"{safe_name}-{digest}.json"
+    reserved_length = len(digest) + len(ENTITY_FILENAME_EXTENSION) + 1
+    max_safe_length = max(1, MAX_ENTITY_FILENAME_LENGTH - reserved_length)
+    safe_name = safe_name[:max_safe_length].strip("-") or "entity"
+
+    return f"{safe_name}-{digest}{ENTITY_FILENAME_EXTENSION}"
+
+
+def entity_file_name(entity):
+    return build_entity_filename(entity["entity_key"])
 
 
 def write_entity_files(entity_dir, entities):
@@ -915,7 +926,7 @@ def write_entity_files(entity_dir, entities):
     entity_dir.mkdir(parents=True, exist_ok=True)
 
     for entity in entities:
-        file_path = entity_dir / entity_file_name(entity)
+        file_path = entity_dir / build_entity_filename(entity["entity_key"])
         payload = dict(entity)
         payload["mentions"] = entity["mentions"][:25]
         file_path.write_text(

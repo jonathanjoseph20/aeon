@@ -2,6 +2,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -240,6 +241,120 @@ class BuildEntitySummaryTests(unittest.TestCase):
             self.assertIn("ETH", entity_names)
             self.assertIn("RWA", entity_names)
             self.assertIn("ZK", entity_names)
+
+    def test_build_entity_summary_uses_safe_deterministic_filenames(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir = Path(temp_dir)
+            log_path = temp_dir / "intake_log.jsonl"
+            entity_summary_path = temp_dir / "entity_summary.json"
+            entities_dir = temp_dir / "entities"
+
+            write_jsonl(
+                log_path,
+                [
+                    {
+                        "item_id": "alpha-1",
+                        "source_type": "twitter",
+                        "source_name": "alpha feed",
+                        "subject": "alpha item",
+                        "content_preview": "alpha item",
+                        "importance_score": 5,
+                        "timestamp": "2026-05-25T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "beta-1",
+                        "source_type": "twitter",
+                        "source_name": "beta feed",
+                        "subject": "beta item",
+                        "content_preview": "beta item",
+                        "importance_score": 5,
+                        "timestamp": "2026-05-25T11:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                ],
+            )
+
+            long_entity_key = (
+                "https://nitter.net/"
+                + "very-long-segment-" * 20
+                + "openai"
+            )
+            malformed_url_key = (
+                "https://x.com/"
+                + "bad-path-" * 18
+                + "status/1234567890?utm_source=feed&ref=home"
+            )
+            repeated_key = "OpenAI"
+
+            def fake_extract_entities(text, configured_entities=None):
+                return [
+                    {
+                        "entity_key": long_entity_key,
+                        "entity_name": long_entity_key,
+                        "position": 0,
+                    },
+                    {
+                        "entity_key": malformed_url_key,
+                        "entity_name": malformed_url_key,
+                        "position": 1,
+                    },
+                    {
+                        "entity_key": repeated_key,
+                        "entity_name": repeated_key,
+                        "position": 2,
+                    },
+                    {
+                        "entity_key": repeated_key,
+                        "entity_name": repeated_key,
+                        "position": 3,
+                    },
+                ]
+
+            with mock.patch.object(
+                build_entity_summary,
+                "extract_entities",
+                side_effect=fake_extract_entities,
+            ):
+                summary = build_entity_summary.build_entity_summary(
+                    log_path=log_path,
+                    output_path=entity_summary_path,
+                    entity_dir=entities_dir,
+                )
+
+            self.assertTrue(entity_summary_path.exists())
+            self.assertEqual(summary["entity_count"], 3)
+
+            written_files = sorted(entities_dir.glob("*.json"))
+            self.assertEqual(len(written_files), 3)
+
+            expected_by_filename = {
+                build_entity_summary.build_entity_filename(long_entity_key): long_entity_key,
+                build_entity_summary.build_entity_filename(malformed_url_key): malformed_url_key,
+                build_entity_summary.build_entity_filename(repeated_key): repeated_key,
+            }
+
+            self.assertEqual(
+                {path.name for path in written_files},
+                set(expected_by_filename),
+            )
+
+            for path in written_files:
+                self.assertLessEqual(
+                    len(path.name),
+                    build_entity_summary.MAX_ENTITY_FILENAME_LENGTH,
+                )
+                self.assertNotIn("/", path.name)
+                self.assertNotIn("\\", path.name)
+
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(payload["entity_key"], expected_by_filename[path.name])
+                self.assertEqual(
+                    path.name,
+                    build_entity_summary.build_entity_filename(payload["entity_key"]),
+                )
 
 
 if __name__ == "__main__":
