@@ -93,3 +93,6 @@ workspace/wiki/synthesis/
 
 # Hermes generated synthesis
 workspace/wiki/synthesis/
+
+# Hermes generated task artifacts
+workspace/wiki/tasks/
