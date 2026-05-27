@@ -128,6 +128,10 @@ def build_pipeline_steps(
                 "command": build_command("promote_to_hermes.py"),
             },
             {
+                "label": "Build entity summary",
+                "command": build_command("build_entity_summary.py"),
+            },
+            {
                 "label": "Build digest",
                 "command": build_command("build_digest.py"),
             },
