@@ -1,0 +1,65 @@
+# Canonical AEON entity registry.
+# Fields:
+#   aliases, type, verticals, priority, watchlist_enabled, watchlist_boost
+
+entities:
+  Venice:
+    aliases:
+      - Venice AI
+      - VVV
+      - DIEM
+    type: company
+    verticals: [AI, Portfolio]
+    priority: 6
+    watchlist_enabled: true
+    watchlist_boost: 6
+
+  Dolphin:
+    aliases:
+      - Dolphin AI
+      - POD
+      - $POD
+      - xPOD
+    type: protocol
+    verticals: [AI, Portfolio]
+    priority: 6
+    watchlist_enabled: true
+    watchlist_boost: 6
+
+  Base:
+    aliases:
+      - Coinbase Base
+      - Base ecosystem
+      - Base chain
+      - Base app
+      - Base mainnet
+      - Base network
+    type: network
+    verticals: [DeFi, Portfolio]
+    priority: 4
+    watchlist_enabled: true
+    watchlist_boost: 4
+
+  RWA:
+    aliases:
+      - tokenization
+      - tokenized assets
+      - tokenised assets
+      - real world assets
+      - private credit
+      - stablecoin
+    type: theme
+    verticals: [RWA]
+    priority: 5
+    watchlist_enabled: true
+    watchlist_boost: 5
+
+  OpenRouter:
+    aliases:
+      - inference routing
+      - model routing
+    type: platform
+    verticals: [AI]
+    priority: 5
+    watchlist_enabled: true
+    watchlist_boost: 5

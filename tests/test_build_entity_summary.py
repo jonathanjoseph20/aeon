@@ -242,6 +242,223 @@ class BuildEntitySummaryTests(unittest.TestCase):
             self.assertIn("RWA", entity_names)
             self.assertIn("ZK", entity_names)
 
+    def test_aliases_collapse_to_canonical_entities(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir = Path(temp_dir)
+            log_path = temp_dir / "intake_log.jsonl"
+            entity_summary_path = temp_dir / "entity_summary.json"
+            entities_dir = temp_dir / "entities"
+
+            write_jsonl(
+                log_path,
+                [
+                    {
+                        "item_id": "venice-ai",
+                        "source_type": "twitter",
+                        "source_name": "alpha feed",
+                        "subject": "market note",
+                        "content_preview": "Venice AI is back in the mix.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-20T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "venice-vvv",
+                        "source_type": "newsletter",
+                        "source_name": "beta note",
+                        "subject": "market note",
+                        "content_preview": "VVV was mentioned in the morning brief.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-21T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "venice-diem",
+                        "source_type": "pdf",
+                        "source_name": "gamma memo",
+                        "subject": "market note",
+                        "content_preview": "DIEM stayed on the radar.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-22T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "dolphin",
+                        "source_type": "twitter",
+                        "source_name": "delta feed",
+                        "subject": "market note",
+                        "content_preview": "Dolphin showed up in a product update.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-23T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "dolphin-ai",
+                        "source_type": "newsletter",
+                        "source_name": "epsilon note",
+                        "subject": "market note",
+                        "content_preview": "Dolphin AI got another mention.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-24T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "dolphin-pod",
+                        "source_type": "pdf",
+                        "source_name": "zeta memo",
+                        "subject": "market note",
+                        "content_preview": "POD was referenced alongside $POD.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-25T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "dolphin-xpod",
+                        "source_type": "twitter",
+                        "source_name": "eta feed",
+                        "subject": "market note",
+                        "content_preview": "xPOD was part of the same thread.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-26T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "base",
+                        "source_type": "twitter",
+                        "source_name": "theta feed",
+                        "subject": "market note",
+                        "content_preview": "Base was discussed in the network update.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-27T10:00:00Z",
+                        "verticals": ["DeFi"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "base-base",
+                        "source_type": "newsletter",
+                        "source_name": "iota note",
+                        "subject": "market note",
+                        "content_preview": "Coinbase Base added a new app surface.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-28T10:00:00Z",
+                        "verticals": ["DeFi"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "rwa",
+                        "source_type": "pdf",
+                        "source_name": "kappa memo",
+                        "subject": "market note",
+                        "content_preview": "RWA continued to attract attention.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-29T10:00:00Z",
+                        "verticals": ["RWA"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "rwa-tokenization",
+                        "source_type": "twitter",
+                        "source_name": "lambda feed",
+                        "subject": "market note",
+                        "content_preview": "tokenization was part of the discussion.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-30T10:00:00Z",
+                        "verticals": ["RWA"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "rwa-tokenized-assets",
+                        "source_type": "twitter",
+                        "source_name": "mu feed",
+                        "subject": "market note",
+                        "content_preview": "tokenized assets were part of the same discussion.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-30T11:00:00Z",
+                        "verticals": ["RWA"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "openrouter",
+                        "source_type": "newsletter",
+                        "source_name": "nu note",
+                        "subject": "market note",
+                        "content_preview": "OpenRouter kept improving the stack.",
+                        "importance_score": 4,
+                        "timestamp": "2026-05-31T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "openrouter-routing",
+                        "source_type": "pdf",
+                        "source_name": "xi memo",
+                        "subject": "market note",
+                        "content_preview": "inference routing and model routing were highlighted.",
+                        "importance_score": 4,
+                        "timestamp": "2026-06-01T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "noisy-oneoff",
+                        "source_type": "twitter",
+                        "source_name": "omicron feed",
+                        "subject": "market note",
+                        "content_preview": "Nebula is the only mention here.",
+                        "importance_score": 2,
+                        "timestamp": "2026-06-02T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                ],
+            )
+
+            summary = build_entity_summary.build_entity_summary(
+                log_path=log_path,
+                output_path=entity_summary_path,
+                entity_dir=entities_dir,
+            )
+
+            entities_by_name = {
+                entity["entity_name"]: entity
+                for entity in summary["entities"]
+            }
+            entity_names = set(entities_by_name)
+
+            self.assertTrue({"Venice", "Dolphin", "Base", "RWA", "OpenRouter"}.issubset(entity_names))
+            self.assertNotIn("Venice AI", entity_names)
+            self.assertNotIn("VVV", entity_names)
+            self.assertNotIn("DIEM", entity_names)
+            self.assertNotIn("Dolphin AI", entity_names)
+            self.assertNotIn("$POD", entity_names)
+            self.assertNotIn("Coinbase Base", entity_names)
+            self.assertNotIn("tokenization", entity_names)
+            self.assertNotIn("tokenized assets", entity_names)
+            self.assertNotIn("inference routing", entity_names)
+            self.assertNotIn("Nebula", entity_names)
+
+            self.assertEqual(entities_by_name["Venice"]["mention_count"], 3)
+            self.assertEqual(entities_by_name["Dolphin"]["mention_count"], 4)
+            self.assertEqual(entities_by_name["Base"]["mention_count"], 2)
+            self.assertEqual(entities_by_name["RWA"]["mention_count"], 3)
+            self.assertEqual(entities_by_name["OpenRouter"]["mention_count"], 2)
+
+            self.assertEqual(entities_by_name["Venice"]["entity_type"], "company")
+            self.assertEqual(entities_by_name["Dolphin"]["entity_type"], "protocol")
+            self.assertEqual(entities_by_name["Base"]["entity_type"], "network")
+            self.assertEqual(entities_by_name["RWA"]["entity_type"], "theme")
+            self.assertEqual(entities_by_name["OpenRouter"]["entity_type"], "platform")
+
+            for canonical_name in ("Venice", "Dolphin", "Base", "RWA", "OpenRouter"):
+                self.assertGreaterEqual(entities_by_name[canonical_name]["entity_confidence"], 0.95)
+
     def test_build_entity_summary_uses_safe_deterministic_filenames(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)

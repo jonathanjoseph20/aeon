@@ -11,6 +11,7 @@ import yaml
 DEFAULT_LOG_PATH = Path("data/processed/intake_log.jsonl")
 DEFAULT_OUTPUT_PATH = Path("data/processed/entity_summary.json")
 DEFAULT_ENTITY_DIR = Path("data/processed/entities")
+DEFAULT_ENTITIES_PATH = Path("config/entities.yml")
 DEFAULT_WATCHLIST_PATH = Path("config/watchlist.yml")
 DEFAULT_SOURCES_PATH = Path("config/sources.yml")
 MAX_ENTITY_FILENAME_LENGTH = 120
@@ -250,6 +251,147 @@ def clean_token(token):
     return token.strip()
 
 
+def normalize_entity_type(value):
+    entity_type = re.sub(r"[^a-z0-9]+", "_", clean_text(value).lower()).strip("_")
+    return entity_type or "unknown"
+
+
+def normalize_flag(value, default=False):
+    if isinstance(value, bool):
+        return value
+
+    if value is None:
+        return default
+
+    return str(value).strip().lower() not in {"", "0", "false", "no", "off", "none"}
+
+
+def normalize_entity_list(value):
+    if value is None:
+        return []
+
+    if not isinstance(value, list):
+        value = [value]
+
+    cleaned = []
+    seen = set()
+
+    for item in value:
+        text = clean_text(item)
+
+        if not text or text in seen:
+            continue
+
+        seen.add(text)
+        cleaned.append(text)
+
+    return cleaned
+
+
+def resolve_entity_alias(alias, alias_index):
+    alias_key = entity_key(alias)
+
+    if not alias_key:
+        return None
+
+    return alias_index.get(alias_key)
+
+
+def build_entity_candidate(spec, match_start, match_confidence, matched_alias):
+    return {
+        "entity_key": spec["entity_key"],
+        "entity_name": spec["entity_name"],
+        "entity_type": spec["entity_type"],
+        "entity_confidence": round(match_confidence, 2),
+        "position": match_start,
+        "priority": spec["priority"],
+        "matched_alias": matched_alias,
+    }
+
+
+def legacy_entity_spec(entity_name, entity_data):
+    aliases = normalize_entity_list(entity_data.get("token_match") or [])
+    aliases.extend(alias for alias in normalize_entity_list(entity_data.get("phrase_match") or []) if alias not in aliases)
+
+    return {
+        "entity_name": entity_name,
+        "entity_key": entity_key(entity_name),
+        "entity_type": normalize_entity_type(entity_data.get("type") or "watchlist"),
+        "verticals": normalize_entity_list(entity_data.get("verticals") or []),
+        "priority": safe_int(entity_data.get("score_boost"), 0),
+        "watchlist_enabled": True,
+        "watchlist_boost": safe_int(entity_data.get("score_boost"), 0),
+        "aliases": aliases,
+        "regexes": normalize_entity_list(entity_data.get("regex_match") or []),
+    }
+
+
+def build_entity_spec(entity_name, entity_data, *, default_priority=0, default_type="entity"):
+    entity_name = clean_text(entity_name)
+
+    if not entity_name:
+        return None
+
+    aliases = normalize_entity_list(entity_data.get("aliases") or [])
+    if entity_name not in aliases:
+        aliases.insert(0, entity_name)
+
+    alias_records = []
+
+    for alias in aliases:
+        pattern = build_entity_pattern(alias)
+
+        if pattern is None:
+            continue
+
+        alias_records.append(
+            {
+                "alias": alias,
+                "alias_key": entity_key(alias),
+                "pattern": pattern,
+                "confidence": 1.0 if entity_key(alias) == entity_key(entity_name) else 0.96,
+            }
+        )
+
+    regexes = entity_data.get("regexes") or []
+
+    if not isinstance(regexes, list):
+        regexes = [regexes]
+
+    for regex in regexes:
+        regex_text = clean_text(regex)
+
+        if not regex_text:
+            continue
+
+        try:
+            alias_records.append(
+                {
+                    "alias": regex_text,
+                    "alias_key": entity_key(regex_text),
+                    "pattern": re.compile(regex_text, re.IGNORECASE),
+                    "confidence": 0.96,
+                }
+            )
+        except re.error:
+            continue
+
+    return {
+        "entity_name": entity_name,
+        "entity_key": entity_key(entity_name),
+        "entity_type": normalize_entity_type(entity_data.get("type") or default_type),
+        "verticals": normalize_entity_list(entity_data.get("verticals") or []),
+        "priority": safe_int(entity_data.get("priority"), default_priority),
+        "watchlist_enabled": normalize_flag(entity_data.get("watchlist_enabled"), True),
+        "watchlist_boost": safe_int(
+            entity_data.get("watchlist_boost"),
+            safe_int(entity_data.get("priority"), default_priority),
+        ),
+        "aliases": aliases,
+        "alias_records": alias_records,
+    }
+
+
 def token_is_entity(token):
     token = clean_token(token)
 
@@ -315,49 +457,95 @@ def build_entity_pattern(alias):
     )
 
 
-def load_configured_entities(watchlist_path=DEFAULT_WATCHLIST_PATH, sources_path=DEFAULT_SOURCES_PATH):
+def load_configured_entities(
+    entities_path=DEFAULT_ENTITIES_PATH,
+    watchlist_path=DEFAULT_WATCHLIST_PATH,
+    sources_path=DEFAULT_SOURCES_PATH,
+):
     configured_entities = {}
 
-    watchlist_data = load_yaml_file(watchlist_path)
-    for entity_name, entity_data in (watchlist_data.get("entities") or {}).items():
-        entity_name = clean_text(entity_name)
+    entities_data = load_yaml_file(entities_path)
+    entity_specs = entities_data.get("entities") or {}
 
-        if not entity_name:
-            continue
+    if not entity_specs:
+        watchlist_data = load_yaml_file(watchlist_path)
+        entity_specs = watchlist_data.get("entities") or {}
 
-        entry = configured_entities.setdefault(
-            entity_key(entity_name),
-            {
-                "entity_name": entity_name,
-                "priority": 0,
-                "patterns": [],
-            },
-        )
-        entry["entity_name"] = entity_name
-        entry["priority"] = max(entry["priority"], 3)
+    for entity_name, entity_data in entity_specs.items():
+        if "aliases" in entity_data or "type" in entity_data:
+            spec = build_entity_spec(
+                entity_name,
+                entity_data,
+                default_priority=entity_data.get("priority", 0),
+                default_type=entity_data.get("type", "entity"),
+            )
+        else:
+            legacy_spec = legacy_entity_spec(entity_name, entity_data)
+            spec = build_entity_spec(
+                legacy_spec["entity_name"],
+                legacy_spec,
+                default_priority=legacy_spec["priority"],
+                default_type=legacy_spec["entity_type"],
+            )
+            spec["alias_records"] = []
 
-        for field_name in ("token_match", "phrase_match"):
-            aliases = entity_data.get(field_name) or []
-
-            if not isinstance(aliases, list):
-                aliases = [aliases]
-
-            for alias in aliases:
+            for alias in legacy_spec["aliases"]:
                 pattern = build_entity_pattern(alias)
 
                 if pattern is not None:
-                    entry["patterns"].append(pattern)
+                    spec["alias_records"].append(
+                        {
+                            "alias": alias,
+                            "alias_key": entity_key(alias),
+                            "pattern": pattern,
+                            "confidence": 0.96 if entity_key(alias) != spec["entity_key"] else 1.0,
+                        }
+                    )
 
-        regexes = entity_data.get("regex_match") or []
+            for regex in legacy_spec["regexes"]:
+                try:
+                    spec["alias_records"].append(
+                        {
+                            "alias": regex,
+                            "alias_key": entity_key(regex),
+                            "pattern": re.compile(regex, re.IGNORECASE),
+                            "confidence": 0.96,
+                        }
+                    )
+                except re.error:
+                    continue
 
-        if not isinstance(regexes, list):
-            regexes = [regexes]
+        if spec is None:
+            continue
 
-        for regex in regexes:
-            try:
-                entry["patterns"].append(re.compile(regex, re.IGNORECASE))
-            except re.error:
-                continue
+        entry = configured_entities.setdefault(
+            spec["entity_key"],
+            {
+                "entity_name": spec["entity_name"],
+                "entity_key": spec["entity_key"],
+                "entity_type": spec["entity_type"],
+                "verticals": list(spec["verticals"]),
+                "priority": spec["priority"],
+                "watchlist_enabled": spec["watchlist_enabled"],
+                "watchlist_boost": spec["watchlist_boost"],
+                "aliases": [],
+                "alias_records": [],
+            },
+        )
+
+        if spec["priority"] > entry["priority"] or (
+            spec["priority"] == entry["priority"]
+            and spec["entity_name"].lower() < entry["entity_name"].lower()
+        ):
+            entry["entity_name"] = spec["entity_name"]
+            entry["entity_type"] = spec["entity_type"]
+            entry["watchlist_enabled"] = spec["watchlist_enabled"]
+            entry["watchlist_boost"] = spec["watchlist_boost"]
+
+        entry["priority"] = max(entry["priority"], spec["priority"])
+        entry["verticals"] = list(dict.fromkeys(entry["verticals"] + spec["verticals"]))
+        entry["aliases"] = list(dict.fromkeys(entry["aliases"] + spec["aliases"]))
+        entry["alias_records"].extend(spec["alias_records"])
 
     sources_data = load_yaml_file(sources_path)
     for source_entry in sources_data.get("sources") or []:
@@ -370,18 +558,32 @@ def load_configured_entities(watchlist_path=DEFAULT_WATCHLIST_PATH, sources_path
             entity_key(source_name),
             {
                 "entity_name": source_name,
+                "entity_key": entity_key(source_name),
+                "entity_type": "source",
+                "verticals": [],
                 "priority": 0,
-                "patterns": [],
+                "watchlist_enabled": False,
+                "watchlist_boost": 0,
+                "aliases": [],
+                "alias_records": [],
             },
         )
 
         entry["entity_name"] = source_name
+        entry["entity_type"] = "source"
         entry["priority"] = max(entry["priority"], 2)
 
         pattern = build_entity_pattern(source_name)
 
         if pattern is not None:
-            entry["patterns"].append(pattern)
+            entry["alias_records"].append(
+                {
+                    "alias": source_name,
+                    "alias_key": entity_key(source_name),
+                    "pattern": pattern,
+                    "confidence": 1.0,
+                }
+            )
 
     return list(configured_entities.values())
 
@@ -410,37 +612,63 @@ def extract_configured_entities(text, configured_entities):
     candidates = []
 
     for spec in configured_entities:
-        entity_name = spec["entity_name"]
-        entity_key_value = entity_key(entity_name)
-        best_match_start = None
+        best_candidate = None
 
-        for pattern in spec["patterns"]:
-            match = pattern.search(text)
+        for alias_record in spec["alias_records"]:
+            match = alias_record["pattern"].search(text)
 
             if match is None:
                 continue
 
-            match_start = match.start()
+            candidate = build_entity_candidate(
+                spec,
+                match.start(),
+                alias_record["confidence"],
+                alias_record["alias"],
+            )
 
-            if best_match_start is None or match_start < best_match_start:
-                best_match_start = match_start
+            if best_candidate is None:
+                best_candidate = candidate
+                continue
 
-        if best_match_start is None:
+            if candidate["entity_confidence"] > best_candidate["entity_confidence"]:
+                best_candidate = candidate
+                continue
+
+            if (
+                candidate["entity_confidence"] == best_candidate["entity_confidence"]
+                and candidate["position"] < best_candidate["position"]
+            ):
+                best_candidate = candidate
+
+        if best_candidate is None:
             continue
 
-        if not candidate_is_valid(entity_name):
+        if not candidate_is_valid(best_candidate["entity_name"]):
             continue
 
-        candidates.append(
-            {
-                "entity_key": entity_key_value,
-                "entity_name": entity_name,
-                "position": best_match_start,
-                "priority": spec["priority"],
-            }
-        )
+        candidates.append(best_candidate)
 
     return candidates
+
+
+def unknown_entity_confidence(token_score, strong_tokens, phrase):
+    if strong_tokens >= 2:
+        return 0.84
+
+    if token_score >= 1.95:
+        return 0.96
+
+    if token_score >= 1.8:
+        return 0.9
+
+    if token_score >= 1.4:
+        return 0.72
+
+    if len(phrase.split()) >= 2:
+        return 0.8
+
+    return 0.6
 
 
 def extract_entities(text, configured_entities=None):
@@ -454,6 +682,16 @@ def extract_entities(text, configured_entities=None):
 
     tokens = [match.group(0) for match in TOKEN_RE.finditer(text)]
     candidates = []
+    alias_index = {}
+
+    for spec in sorted(
+        configured_entities,
+        key=lambda entry: (-entry["priority"], entry["entity_name"].lower()),
+    ):
+        alias_index.setdefault(spec["entity_key"], spec)
+
+        for alias_record in spec["alias_records"]:
+            alias_index.setdefault(alias_record["alias_key"], spec)
 
     candidates.extend(extract_configured_entities(text, configured_entities))
     index = 0
@@ -465,7 +703,23 @@ def extract_entities(text, configured_entities=None):
 
         if lowered in SHORT_ENTITY_ALLOWLIST:
             canonical_token = clean_token(token)
-            candidates.append((entity_key(canonical_token), canonical_token, index))
+            resolved = resolve_entity_alias(canonical_token, alias_index)
+
+            if resolved is not None:
+                match_confidence = 1.0 if entity_key(canonical_token) == resolved["entity_key"] else 0.96
+                candidates.append(build_entity_candidate(resolved, index, match_confidence, canonical_token))
+            else:
+                candidates.append(
+                    {
+                        "entity_key": entity_key(canonical_token),
+                        "entity_name": canonical_token,
+                        "entity_type": "unknown",
+                        "entity_confidence": 1.0,
+                        "position": index,
+                        "priority": 1,
+                        "matched_alias": canonical_token,
+                    }
+                )
             index += 1
             continue
 
@@ -492,14 +746,33 @@ def extract_entities(text, configured_entities=None):
 
                 phrase_tokens = tokens[start:end]
                 phrase = canonicalize_phrase(phrase_tokens)
-                key = entity_key(phrase)
 
-                if phrase and key and candidate_is_valid(phrase):
+                if phrase and candidate_is_valid(phrase):
                     if len(phrase_tokens) == 2 and clean_token(phrase_tokens[1]).lower() in SHORT_ENTITY_ALLOWLIST:
                         index += 1
                         continue
 
-                    candidates.append((key, phrase, start))
+                    resolved = resolve_entity_alias(phrase, alias_index)
+
+                    if resolved is not None:
+                        match_confidence = 1.0 if entity_key(phrase) == resolved["entity_key"] else 0.96
+                        candidates.append(build_entity_candidate(resolved, start, match_confidence, phrase))
+                    else:
+                        candidates.append(
+                            {
+                                "entity_key": entity_key(phrase),
+                                "entity_name": phrase,
+                                "entity_type": "unknown",
+                                "entity_confidence": unknown_entity_confidence(
+                                    1.4,
+                                    len([token for token in phrase_tokens if token_is_entity(token)[0]]),
+                                    phrase,
+                                ),
+                                "position": start,
+                                "priority": 1,
+                                "matched_alias": phrase,
+                            }
+                        )
 
                 index = end
                 continue
@@ -536,10 +809,25 @@ def extract_entities(text, configured_entities=None):
 
         phrase_tokens = tokens[start:end]
         phrase = canonicalize_phrase(phrase_tokens)
-        key = entity_key(phrase)
 
-        if phrase and key and candidate_is_valid(phrase) and (strong_tokens >= 2 or score >= 1.3):
-            candidates.append((key, phrase, start))
+        if phrase and candidate_is_valid(phrase) and (strong_tokens >= 2 or score >= 1.3):
+            resolved = resolve_entity_alias(phrase, alias_index)
+
+            if resolved is not None:
+                match_confidence = 1.0 if entity_key(phrase) == resolved["entity_key"] else 0.96
+                candidates.append(build_entity_candidate(resolved, start, match_confidence, phrase))
+            else:
+                candidates.append(
+                    {
+                        "entity_key": entity_key(phrase),
+                        "entity_name": phrase,
+                        "entity_type": "unknown",
+                        "entity_confidence": unknown_entity_confidence(score, strong_tokens, phrase),
+                        "position": start,
+                        "priority": 1,
+                        "matched_alias": phrase,
+                    }
+                )
 
         index = end if end > index else index + 1
 
@@ -548,29 +836,28 @@ def extract_entities(text, configured_entities=None):
     for candidate in sorted(
         candidates,
         key=lambda entry: (
-            -entry.get("priority", 1) if isinstance(entry, dict) else 0,
-            entry[2] if isinstance(entry, tuple) else entry["position"],
+            -entry.get("priority", 1),
+            -entry.get("entity_confidence", 0),
+            entry["position"],
+            entry["entity_name"].lower(),
         ),
     ):
-        if isinstance(candidate, dict):
-            key = candidate["entity_key"]
-            value = (candidate["entity_name"], candidate["position"], candidate["priority"])
-        else:
-            key, phrase, start = candidate
-            value = (phrase, start, 1)
+        key = candidate["entity_key"]
 
-        existing = deduped.get(key)
+        if key in deduped:
+            continue
 
-        if existing is None or value[2] > existing[2] or (value[2] == existing[2] and value[1] < existing[1]):
-            deduped[key] = value
+        deduped[key] = candidate
 
     return [
         {
-            "entity_key": key,
-            "entity_name": value[0],
-            "position": value[1],
+            "entity_key": candidate["entity_key"],
+            "entity_name": candidate["entity_name"],
+            "entity_type": candidate["entity_type"],
+            "entity_confidence": candidate["entity_confidence"],
+            "position": candidate["position"],
         }
-        for key, value in deduped.items()
+        for candidate in deduped.values()
     ]
 
 
@@ -610,6 +897,7 @@ def build_entity_summary(
     log_path=DEFAULT_LOG_PATH,
     output_path=DEFAULT_OUTPUT_PATH,
     entity_dir=DEFAULT_ENTITY_DIR,
+    entities_path=DEFAULT_ENTITIES_PATH,
     watchlist_path=DEFAULT_WATCHLIST_PATH,
     sources_path=DEFAULT_SOURCES_PATH,
 ):
@@ -621,7 +909,7 @@ def build_entity_summary(
 
     items = load_items(log_path)
     aggregates = {}
-    configured_entities = load_configured_entities(watchlist_path, sources_path)
+    configured_entities = load_configured_entities(entities_path, watchlist_path, sources_path)
 
     for fallback_index, item in enumerate(items):
         if not is_digest_enabled(item):
@@ -662,7 +950,9 @@ def build_entity_summary(
                 {
                     "entity_key": key,
                     "entity_name": entity["entity_name"],
+                    "entity_type": entity.get("entity_type", "unknown"),
                     "mention_count": 0,
+                    "confidence_total": 0.0,
                     "source_names": set(),
                     "source_types": set(),
                     "importance_total": 0,
@@ -680,7 +970,13 @@ def build_entity_summary(
             if not aggregate["entity_name"]:
                 aggregate["entity_name"] = entity["entity_name"]
 
+            entity_type = entity.get("entity_type", "unknown")
+
+            if aggregate["entity_type"] == "unknown" and entity_type != "unknown":
+                aggregate["entity_type"] = entity_type
+
             aggregate["mention_count"] += 1
+            aggregate["confidence_total"] += entity.get("entity_confidence", 0.0)
             aggregate["source_names"].add(source_name)
             aggregate["source_types"].add(source_type)
             aggregate["importance_total"] += importance_score
@@ -692,6 +988,9 @@ def build_entity_summary(
                 "item_id": item_id(item, fallback_index),
                 "source_name": source_name,
                 "source_type": source_type,
+                "entity_name": entity["entity_name"],
+                "entity_type": entity.get("entity_type", "unknown"),
+                "entity_confidence": entity.get("entity_confidence", 0.0),
                 "subject": clean_text(item.get("subject")),
                 "timestamp": item_ts.isoformat() if item_ts else "",
                 "importance_score": importance_score,
@@ -740,11 +1039,18 @@ def build_entity_summary(
         latest_timestamp = aggregate["latest_mention_timestamp"]
         timestamp_value = latest_timestamp.isoformat() if latest_timestamp else ""
         average_importance = round(aggregate["importance_total"] / mention_count, 2) if mention_count else 0.0
+        average_confidence = round(aggregate["confidence_total"] / mention_count, 2) if mention_count else 0.0
+
+        if aggregate["entity_type"] == "unknown" and mention_count == 1 and average_confidence < 0.85:
+            continue
+
         trend_label, trend_score = classify_trend(mentions)
 
         entity_record = {
             "entity_key": aggregate["entity_key"],
             "entity_name": aggregate["entity_name"],
+            "entity_type": aggregate["entity_type"],
+            "entity_confidence": average_confidence,
             "mention_count": mention_count,
             "source_diversity": len(source_names),
             "source_type_diversity": len(source_types),
@@ -829,6 +1135,8 @@ def entity_without_mentions(entity):
     return {
         "entity_key": entity["entity_key"],
         "entity_name": entity["entity_name"],
+        "entity_type": entity.get("entity_type", "unknown"),
+        "entity_confidence": entity.get("entity_confidence", 0.0),
         "mention_count": entity["mention_count"],
         "source_diversity": entity["source_diversity"],
         "source_type_diversity": entity["source_type_diversity"],
