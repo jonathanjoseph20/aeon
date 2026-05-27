@@ -45,6 +45,20 @@ GMAIL_LABEL_VERTICAL_PRIORS = {
     "Research/Personal": ["Personal"]
 }
 
+HIGH_RISK_PERSONAL_VERTICALS = {"AI", "DeFi", "RWA"}
+PERSONAL_HEALTH_SOURCE_HINTS = (
+    "health",
+    "healthcare",
+    "medical",
+    "medicine",
+    "longevity",
+    "nutrition",
+    "supplement",
+    "wellness",
+    "personal",
+)
+PERSONAL_HEALTH_EXPLICIT_MATCH_THRESHOLD = 2
+
 
 def load_yaml(path):
     if not path.exists():
@@ -63,6 +77,29 @@ def safe_int(value, default=1):
 
 def normalize_handle(value):
     return str(value or "").strip().lstrip("@").lower()
+
+
+def is_personal_health_source(metadata, gmail_label):
+    source_verticals = {
+        str(vertical).strip()
+        for vertical in metadata.get("source_verticals", [])
+        if str(vertical).strip()
+    }
+
+    if "Personal" in source_verticals:
+        return True
+
+    if str(gmail_label or "").strip() == "Research/Personal":
+        return True
+
+    source_name = " ".join(
+        [
+            str(metadata.get("source_name") or ""),
+            str(metadata.get("source_domain") or ""),
+        ]
+    ).lower()
+
+    return any(hint in source_name for hint in PERSONAL_HEALTH_SOURCE_HINTS)
 
 
 def infer_source_from_sender(sender):
@@ -506,6 +543,7 @@ def classify_item(
         return None
 
     scores = {}
+    keyword_scores = {}
 
     for vertical, data in verticals.items():
         keywords = data.get("keywords", []) or []
@@ -515,6 +553,9 @@ def classify_item(
             score += normalized_content.count(str(keyword).lower())
 
         scores[vertical] = score
+        keyword_scores[vertical] = score
+
+    watchlist_scores = {}
 
     for vertical in metadata["source_verticals"]:
         scores[vertical] = scores.get(vertical, 0) + 3
@@ -547,6 +588,10 @@ def classify_item(
 
         for vertical in entity_verticals:
             scores[vertical] = scores.get(vertical, 0) + score_boost
+            watchlist_scores[vertical] = watchlist_scores.get(vertical, 0) + max(
+                score_boost,
+                1,
+            )
 
         metadata["importance_score"] += score_boost
 
@@ -557,6 +602,13 @@ def classify_item(
 
     if watchlist_hits and metadata.get("watchlist_boost"):
         metadata["importance_score"] += safe_int(metadata.get("watchlist_boost"), 0)
+
+    if is_personal_health_source(metadata, gmail_label):
+        for vertical in HIGH_RISK_PERSONAL_VERTICALS:
+            explicit_score = keyword_scores.get(vertical, 0) + watchlist_scores.get(vertical, 0)
+
+            if explicit_score < PERSONAL_HEALTH_EXPLICIT_MATCH_THRESHOLD:
+                scores[vertical] = 0
 
     matched_verticals = [
         vertical for vertical, score in scores.items()
@@ -616,24 +668,23 @@ def classify_item(
     return record
 
 
-def main():
-    log_path = Path("data/processed/intake_log.jsonl")
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.touch(exist_ok=True)
-
-    email_registry = load_email_registry()
-    twitter_registry = load_twitter_registry()
-    source_entries = load_source_entries()
-    verticals = load_verticals()
-    watchlist = load_watchlist()
-    seen = existing_hashes(log_path)
-    raw_items = build_raw_items()
-
-    if not raw_items:
-        print("No intake files found.")
-        raise SystemExit(0)
+def classify_and_write_records(
+    raw_items,
+    log_path,
+    email_registry=None,
+    twitter_registry=None,
+    verticals=None,
+    watchlist=None,
+    source_entries=None,
+):
+    email_registry = email_registry if email_registry is not None else load_email_registry()
+    twitter_registry = twitter_registry if twitter_registry is not None else load_twitter_registry()
+    source_entries = source_entries if source_entries is not None else load_source_entries()
+    verticals = verticals if verticals is not None else load_verticals()
+    watchlist = watchlist if watchlist is not None else load_watchlist()
 
     records = []
+    seen = set()
 
     for raw_item in raw_items:
         record = classify_item(
@@ -653,9 +704,28 @@ def main():
         seen.add(record["dedupe_hash"])
         records.append(record)
 
-    with log_path.open("a") as f:
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with log_path.open("w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(record) + "\n")
+
+    return records
+
+
+def main():
+    log_path = Path("data/processed/intake_log.jsonl")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.touch(exist_ok=True)
+
+    raw_items = build_raw_items()
+
+    if not raw_items:
+        print("No intake files found.")
+        raise SystemExit(0)
+
+    records = classify_and_write_records(raw_items, log_path)
 
     for record in records:
         print(
