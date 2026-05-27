@@ -87,3 +87,6 @@ data/processed/narrative_summary.json
 # Hermes generated memory artifacts
 workspace/wiki/aeon/
 workspace/wiki/meta/aeon_index.jsonl
+
+# Hermes generated synthesis
+workspace/wiki/synthesis/
