@@ -96,3 +96,7 @@ workspace/wiki/synthesis/
 
 # Hermes generated task artifacts
 workspace/wiki/tasks/
+
+# Generated Midas task outbox
+data/outbox/midas/
+data/inbox/midas/
