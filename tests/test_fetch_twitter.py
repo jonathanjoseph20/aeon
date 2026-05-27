@@ -78,10 +78,35 @@ class FetchTwitterFixtureTests(unittest.TestCase):
         )
         return sources_path
 
-    def test_handle_only_sources_generate_rsshub_feed_urls(self):
+    def write_providers_file(self, temp_dir, default_provider="nitter"):
+        providers_path = Path(temp_dir) / "providers.yml"
+        providers_path.write_text(
+            "\n".join(
+                [
+                    "twitter:",
+                    f"  default_provider: {default_provider}",
+                    "  providers:",
+                    "    rsshub:",
+                    "      type: rsshub",
+                    "      url_template: https://rsshub.app/twitter/user/{handle}",
+                    "    nitter:",
+                    "      type: nitter",
+                    "      url_template: https://nitter.net/{handle}/rss",
+                    "    custom:",
+                    "      type: custom",
+                    "      url_template: https://example.invalid/twitter/{handle}.xml",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return providers_path
+
+    def test_provider_url_generation_and_overrides(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)
             sources_path = temp_dir / "sources.yml"
+            providers_path = self.write_providers_file(temp_dir, default_provider="nitter")
             sources_path.write_text(
                 "\n".join(
                     [
@@ -100,6 +125,7 @@ class FetchTwitterFixtureTests(unittest.TestCase):
                         "    source_type: twitter",
                         "    twitter_handle: winner",
                         "    feed_url: https://x.com/notwinner",
+                        "    twitter_feed_provider: rsshub",
                         "  - source_name: sourceonly",
                         "    source_type: twitter",
                         "",
@@ -108,19 +134,22 @@ class FetchTwitterFixtureTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            registry = fetch_twitter.load_twitter_sources(sources_path)
+            registry = fetch_twitter.load_twitter_sources(sources_path, providers_path)
 
             self.assertEqual(
-                fetch_twitter.build_twitter_feed_url(" @0xngmi "),
+                fetch_twitter.build_twitter_feed_url(
+                    " @0xngmi ",
+                    {"type": "rsshub", "url_template": "https://rsshub.app/twitter/user/{handle}"},
+                ),
                 "https://rsshub.app/twitter/user/0xngmi",
             )
             self.assertEqual(
                 registry["0xngmi"]["feed_urls"],
-                ["https://rsshub.app/twitter/user/0xngmi"],
+                ["https://nitter.net/0xngmi/rss"],
             )
             self.assertEqual(
                 registry["twngmi"]["feed_urls"],
-                ["https://rsshub.app/twitter/user/twngmi"],
+                ["https://nitter.net/twngmi/rss"],
             )
             self.assertEqual(
                 registry["customfeed"]["feed_urls"],
@@ -132,13 +161,14 @@ class FetchTwitterFixtureTests(unittest.TestCase):
             )
             self.assertEqual(
                 registry["sourceonly"]["feed_urls"],
-                ["https://rsshub.app/twitter/user/sourceonly"],
+                ["https://nitter.net/sourceonly/rss"],
             )
 
-    def test_source_name_only_twitter_source_generates_rsshub_feed_url(self):
+    def test_source_name_only_twitter_source_generates_default_provider_feed_url(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)
             sources_path = temp_dir / "sources.yml"
+            providers_path = self.write_providers_file(temp_dir, default_provider="nitter")
             sources_path.write_text(
                 "\n".join(
                     [
@@ -151,7 +181,7 @@ class FetchTwitterFixtureTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            registry = fetch_twitter.load_twitter_sources(sources_path)
+            registry = fetch_twitter.load_twitter_sources(sources_path, providers_path)
 
             self.assertEqual(
                 registry["0xngmi"]["source_name"],
@@ -159,13 +189,14 @@ class FetchTwitterFixtureTests(unittest.TestCase):
             )
             self.assertEqual(
                 registry["0xngmi"]["feed_urls"],
-                ["https://rsshub.app/twitter/user/0xngmi"],
+                ["https://nitter.net/0xngmi/rss"],
             )
 
     def test_manual_jsonl_ingestion_writes_normalized_twitter_records(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)
             sources_path = self.write_sources_file(temp_dir)
+            providers_path = self.write_providers_file(temp_dir, default_provider="nitter")
             output_dir = temp_dir / "out"
             manual_path = FIXTURES_DIR / "twitter_manual.jsonl"
 
@@ -177,6 +208,8 @@ class FetchTwitterFixtureTests(unittest.TestCase):
                     str(manual_path),
                     "--sources-file",
                     str(sources_path),
+                    "--providers-file",
+                    str(providers_path),
                     "--output-dir",
                     str(output_dir),
                 ],
@@ -212,6 +245,7 @@ class FetchTwitterFixtureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)
             sources_path = self.write_sources_file(temp_dir)
+            providers_path = self.write_providers_file(temp_dir, default_provider="nitter")
             output_dir = temp_dir / "out"
             health_path = temp_dir / "metadata" / "source_health.jsonl"
 
@@ -224,6 +258,8 @@ class FetchTwitterFixtureTests(unittest.TestCase):
                         "--feeds",
                         "--sources-file",
                         str(sources_path),
+                        "--providers-file",
+                        str(providers_path),
                         "--output-dir",
                         str(output_dir),
                         "--source-health-path",
@@ -266,11 +302,17 @@ class FetchTwitterFixtureTests(unittest.TestCase):
             self.assertEqual(len(health_records), 1)
             self.assertEqual(health_records[0]["status"], "ok")
             self.assertEqual(health_records[0]["error_reason"], "")
+            self.assertEqual(health_records[0]["provider"], "explicit")
+            self.assertEqual(
+                health_records[0]["generated_feed_url"],
+                "https://example.invalid/aaronjmars.xml",
+            )
 
     def test_feed_validation_writes_health_for_valid_html_and_malformed_responses(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)
             sources_path = temp_dir / "sources.yml"
+            providers_path = self.write_providers_file(temp_dir, default_provider="nitter")
             output_dir = temp_dir / "out"
             health_path = temp_dir / "metadata" / "source_health.jsonl"
 
@@ -280,13 +322,13 @@ class FetchTwitterFixtureTests(unittest.TestCase):
                         "twitter:",
                         "  - handle: validfeed",
                         "    name: Valid Feed",
-                        "    feed_url: https://example.invalid/valid.xml",
+                        "    feed_url: https://x.com/validfeed",
                         "  - handle: htmlfeed",
                         "    name: HTML Feed",
-                        "    feed_url: https://example.invalid/html.xml",
+                        "    feed_url: https://x.com/htmlfeed",
                         "  - handle: malformedfeed",
                         "    name: Broken Feed",
-                        "    feed_url: https://example.invalid/malformed.xml",
+                        "    feed_url: https://x.com/malformedfeed",
                         "",
                     ]
                 ),
@@ -300,13 +342,13 @@ class FetchTwitterFixtureTests(unittest.TestCase):
             def fake_urlopen(request, timeout=20):
                 url = request.full_url
 
-                if url.endswith("/valid.xml"):
+                if url == "https://nitter.net/validfeed/rss":
                     return FakeResponse(valid_feed, content_type="application/atom+xml; charset=utf-8")
 
-                if url.endswith("/html.xml"):
+                if url == "https://nitter.net/htmlfeed/rss":
                     return FakeResponse(html_feed, content_type="text/html; charset=utf-8")
 
-                if url.endswith("/malformed.xml"):
+                if url == "https://nitter.net/malformedfeed/rss":
                     return FakeResponse(malformed_feed, content_type="application/xml; charset=utf-8")
 
                 raise AssertionError(f"Unexpected URL: {url}")
@@ -322,6 +364,8 @@ class FetchTwitterFixtureTests(unittest.TestCase):
                         "--feeds",
                         "--sources-file",
                         str(sources_path),
+                        "--providers-file",
+                        str(providers_path),
                         "--output-dir",
                         str(output_dir),
                         "--source-health-path",
@@ -351,6 +395,12 @@ class FetchTwitterFixtureTests(unittest.TestCase):
             self.assertEqual(reasons["Valid Feed"], "")
             self.assertEqual(reasons["HTML Feed"], "html_response")
             self.assertEqual(reasons["Broken Feed"], "malformed_xml")
+            valid_health_record = next(record for record in health_records if record["source_name"] == "Valid Feed")
+            self.assertEqual(valid_health_record["provider"], "nitter")
+            self.assertEqual(
+                valid_health_record["generated_feed_url"],
+                "https://nitter.net/validfeed/rss",
+            )
 
 
 if __name__ == "__main__":

@@ -5,6 +5,12 @@ from urllib.parse import urlparse
 import yaml
 
 
+DEFAULT_TWITTER_PROVIDER = "nitter"
+DEFAULT_TWITTER_PROVIDER_TEMPLATES = {
+    "rsshub": "https://rsshub.app/twitter/user/{handle}",
+    "nitter": "https://nitter.net/{handle}/rss",
+}
+
 PRIORITY_ORDER = {
     "low": 0,
     "medium": 1,
@@ -30,6 +36,10 @@ def normalize_handle(value):
     return normalize_text(value).lstrip("@").lower()
 
 
+def normalize_provider_name(value):
+    return normalize_text(value).lower()
+
+
 def looks_like_twitter_handle(value):
     handle = normalize_handle(value)
 
@@ -39,13 +49,154 @@ def looks_like_twitter_handle(value):
     return bool(re.fullmatch(r"[a-z0-9_]{1,15}", handle))
 
 
-def build_twitter_feed_url(handle, rsshub_base="https://rsshub.app"):
+def normalize_twitter_provider_entry(name, entry):
+    provider_name = normalize_provider_name(name or entry.get("name") or entry.get("type"))
+    provider_type = normalize_provider_name(
+        entry.get("type")
+        or entry.get("provider_type")
+        or provider_name
+    )
+    url_template = normalize_text(
+        entry.get("url_template")
+        or entry.get("template")
+        or entry.get("feed_url_template")
+    )
+
+    if not url_template:
+        url_template = DEFAULT_TWITTER_PROVIDER_TEMPLATES.get(provider_type, "")
+
+    if not url_template:
+        url_template = DEFAULT_TWITTER_PROVIDER_TEMPLATES.get(provider_name, "")
+
+    return {
+        "name": provider_name,
+        "type": provider_type or provider_name,
+        "url_template": url_template,
+    }
+
+
+def load_twitter_provider_config(providers_path=Path("config/providers.yml")):
+    config = load_yaml(providers_path)
+
+    if not isinstance(config, dict):
+        config = {}
+
+    twitter_config = config.get("twitter")
+
+    if not isinstance(twitter_config, dict):
+        twitter_config = {}
+
+    default_provider = normalize_provider_name(
+        twitter_config.get("default_provider")
+        or config.get("default_provider")
+        or DEFAULT_TWITTER_PROVIDER
+    )
+
+    providers_raw = twitter_config.get("providers")
+
+    if providers_raw is None:
+        providers_raw = config.get("providers") or {}
+
+    providers = {}
+
+    if isinstance(providers_raw, dict):
+        provider_items = providers_raw.items()
+    elif isinstance(providers_raw, list):
+        provider_items = []
+
+        for entry in providers_raw:
+            if not isinstance(entry, dict):
+                continue
+
+            provider_name = (
+                entry.get("name")
+                or entry.get("provider")
+                or entry.get("id")
+                or entry.get("type")
+            )
+
+            if provider_name:
+                provider_items.append((provider_name, entry))
+    else:
+        provider_items = []
+
+    for provider_name, entry in provider_items:
+        normalized = normalize_twitter_provider_entry(provider_name, entry)
+
+        if normalized["name"]:
+            providers[normalized["name"]] = normalized
+
+    for provider_name, url_template in DEFAULT_TWITTER_PROVIDER_TEMPLATES.items():
+        providers.setdefault(
+            provider_name,
+            {
+                "name": provider_name,
+                "type": provider_name,
+                "url_template": url_template,
+            },
+        )
+
+    if default_provider not in providers:
+        default_provider = DEFAULT_TWITTER_PROVIDER
+
+    return {
+        "default_provider": default_provider,
+        "providers": providers,
+    }
+
+
+def resolve_twitter_provider(provider=None, providers_config=None):
+    providers_config = providers_config or load_twitter_provider_config()
+    providers = providers_config.get("providers") or {}
+
+    if isinstance(provider, dict):
+        resolved = normalize_twitter_provider_entry(
+            provider.get("name") or provider.get("type") or providers_config.get("default_provider"),
+            provider,
+        )
+
+        if resolved["url_template"]:
+            return resolved
+
+        return providers.get(providers_config.get("default_provider")) or providers.get(DEFAULT_TWITTER_PROVIDER)
+
+    provider_name = normalize_provider_name(
+        provider or providers_config.get("default_provider") or DEFAULT_TWITTER_PROVIDER
+    )
+
+    if provider_name in providers:
+        return providers[provider_name]
+
+    if provider_name in DEFAULT_TWITTER_PROVIDER_TEMPLATES:
+        return {
+            "name": provider_name,
+            "type": provider_name,
+            "url_template": DEFAULT_TWITTER_PROVIDER_TEMPLATES[provider_name],
+        }
+
+    return providers.get(providers_config.get("default_provider")) or providers.get(DEFAULT_TWITTER_PROVIDER)
+
+
+def build_twitter_feed_url(handle, provider=None):
     normalized_handle = normalize_handle(handle)
 
     if not normalized_handle:
         return ""
 
-    return f"{normalize_text(rsshub_base).rstrip('/')}/twitter/user/{normalized_handle}"
+    provider_config = resolve_twitter_provider(provider)
+
+    if not provider_config:
+        return ""
+
+    url_template = normalize_text(provider_config.get("url_template"))
+
+    if not url_template:
+        return ""
+
+    try:
+        return url_template.format(handle=normalized_handle)
+    except Exception:
+        return ""
 
 
 def extract_twitter_handle_from_url(value):
@@ -103,6 +254,79 @@ def normalize_twitter_handle(entry):
     return ""
 
 
+def resolve_twitter_feed_details(entry, providers_config=None, source_type_hint=""):
+    source_type = normalize_source_type(entry.get("source_type"), source_type_hint)
+    providers_config = providers_config or load_twitter_provider_config()
+
+    if source_type != "twitter":
+        feed_urls = entry.get("feed_url") or entry.get("feed_urls") or []
+
+        if isinstance(feed_urls, str):
+            feed_urls = [feed_urls]
+
+        return [normalize_text(url) for url in feed_urls if normalize_text(url)], "", ""
+
+    provider_name = normalize_provider_name(
+        entry.get("twitter_feed_provider")
+        or entry.get("feed_provider")
+        or entry.get("provider")
+    )
+    provider_config = resolve_twitter_provider(provider_name or None, providers_config)
+    provider_label = (
+        provider_config.get("name")
+        or provider_config.get("type")
+        or provider_name
+        or providers_config.get("default_provider")
+        or DEFAULT_TWITTER_PROVIDER
+    )
+
+    feed_urls = entry.get("feed_url") or entry.get("feed_urls") or []
+
+    if isinstance(feed_urls, str):
+        feed_urls = [feed_urls]
+
+    normalized_feed_urls = []
+    saw_explicit_feed_url = False
+    saw_profile_feed_url = False
+
+    for url in feed_urls:
+        normalized_url = normalize_text(url)
+
+        if not normalized_url:
+            continue
+
+        profile_handle = extract_twitter_handle_from_url(normalized_url)
+
+        if profile_handle:
+            normalized_url = build_twitter_feed_url(
+                normalize_twitter_handle(entry) or profile_handle,
+                provider_config,
+            )
+            saw_profile_feed_url = True
+        else:
+            saw_explicit_feed_url = True
+
+        if normalized_url:
+            normalized_feed_urls.append(normalized_url)
+
+    if normalized_feed_urls:
+        if saw_profile_feed_url:
+            return normalized_feed_urls, provider_label, normalized_feed_urls[0]
+
+        if saw_explicit_feed_url:
+            return normalized_feed_urls, "explicit", normalized_feed_urls[0]
+
+    handle = normalize_twitter_handle(entry)
+
+    if handle:
+        generated_url = build_twitter_feed_url(handle, provider_config)
+
+        if generated_url:
+            return [generated_url], provider_label, generated_url
+
+    return [], "", ""
+
+
 def normalize_int(value, default=0):
     try:
         return int(value)
@@ -144,38 +368,9 @@ def normalize_list(value):
     return normalized
 
 
-def normalize_feed_urls(entry):
-    feed_urls = entry.get("feed_url") or entry.get("feed_urls") or []
-
-    if isinstance(feed_urls, str):
-        feed_urls = [feed_urls]
-
-    normalized_feed_urls = []
-
-    for url in feed_urls:
-        normalized_url = normalize_text(url)
-
-        if not normalized_url:
-            continue
-
-        profile_handle = extract_twitter_handle_from_url(normalized_url)
-
-        if normalize_source_type(entry.get("source_type")) == "twitter" and profile_handle:
-            preferred_handle = normalize_twitter_handle(entry) or profile_handle
-            normalized_url = build_twitter_feed_url(preferred_handle)
-
-        normalized_feed_urls.append(normalized_url)
-
-    if normalized_feed_urls:
-        return normalized_feed_urls
-
-    if normalize_source_type(entry.get("source_type")) == "twitter":
-        generated_url = build_twitter_feed_url(normalize_twitter_handle(entry))
-
-        if generated_url:
-            return [generated_url]
-
-    return []
+def normalize_feed_urls(entry, providers_config=None, source_type_hint=""):
+    feed_urls, _, _ = resolve_twitter_feed_details(entry, providers_config, source_type_hint)
+    return feed_urls
 
 
 def normalize_source_type(value, fallback=""):
@@ -190,9 +385,14 @@ def normalize_source_type(value, fallback=""):
     return source_type
 
 
-def normalize_source_entry(entry, source_type_hint=""):
+def normalize_source_entry(entry, source_type_hint="", providers_config=None):
     source_type = normalize_source_type(entry.get("source_type"), source_type_hint)
-    feed_urls = normalize_feed_urls(entry)
+    feed_urls, feed_provider, generated_feed_url = resolve_twitter_feed_details(
+        entry,
+        providers_config,
+        source_type,
+    )
+
     handle = normalize_twitter_handle(entry) if source_type == "twitter" else normalize_handle(
         entry.get("handle")
         or entry.get("source_handle")
@@ -221,6 +421,8 @@ def normalize_source_entry(entry, source_type_hint=""):
             "default_verticals": default_verticals,
             "feed_urls": feed_urls,
             "feed_url": feed_urls[0] if feed_urls else normalize_text(entry.get("feed_url")),
+            "generated_feed_url": generated_feed_url,
+            "feed_provider": feed_provider,
             "watchlist_boost": normalize_int(entry.get("watchlist_boost"), 0),
             "promotion_threshold_override": (
                 normalize_int(threshold_override, 0)
@@ -231,6 +433,7 @@ def normalize_source_entry(entry, source_type_hint=""):
             "alert_enabled": normalize_bool(entry.get("alert_enabled"), True),
             "handle": handle,
             "twitter_handle": normalize_handle(entry.get("twitter_handle") or handle),
+            "twitter_feed_provider": feed_provider,
             "gmail_label": normalize_text(entry.get("gmail_label")),
             "source_domain": normalize_text(entry.get("source_domain")),
             "source_url": normalize_text(entry.get("source_url")),
@@ -243,22 +446,26 @@ def normalize_source_entry(entry, source_type_hint=""):
     return normalized
 
 
-def iter_source_entries(config):
+def iter_source_entries(config, providers_config=None):
     if config.get("sources"):
         for entry in config.get("sources") or []:
             if isinstance(entry, dict):
-                yield normalize_source_entry(entry)
+                yield normalize_source_entry(entry, providers_config=providers_config)
         return
 
     for section in ("twitter", "newsletters", "pdf", "pdfs"):
         for entry in config.get(section, []) or []:
             if isinstance(entry, dict):
-                yield normalize_source_entry(entry, section)
+                yield normalize_source_entry(entry, section, providers_config)
 
 
-def load_source_entries(sources_path=Path("config/sources.yml")):
+def load_source_entries(
+    sources_path=Path("config/sources.yml"),
+    providers_path=Path("config/providers.yml"),
+):
     config = load_yaml(sources_path)
-    return list(iter_source_entries(config))
+    providers_config = load_twitter_provider_config(providers_path)
+    return list(iter_source_entries(config, providers_config))
 
 
 def _matches_source_type(item_source_type, entry_source_type):

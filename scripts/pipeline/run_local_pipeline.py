@@ -39,18 +39,9 @@ def has_pdf_inputs(pdf_input_dir):
     return any(pdf_input_dir.glob("*.pdf"))
 
 
-def normalize_feed_urls(entry):
-    feed_urls = entry.get("feed_url") or entry.get("feed_urls") or []
-
-    if isinstance(feed_urls, str):
-        feed_urls = [feed_urls]
-
-    return [str(url).strip() for url in feed_urls if str(url).strip()]
-
-
 def has_twitter_feeds(sources_file):
     for entry in load_source_entries(sources_file):
-        if normalize_source_type(entry.get("source_type")) == "twitter" and normalize_feed_urls(entry):
+        if normalize_source_type(entry.get("source_type")) == "twitter" and entry.get("feed_urls"):
             return True
 
     return False

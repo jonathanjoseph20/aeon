@@ -2,6 +2,7 @@
 
 `config/sources.yml` is the source registry AEON uses for downstream scoring and filtering.
 It lets you tune source priority, default verticals, watchlist boosts, Hermes promotion thresholds, and whether a source can appear in the digest or alert queue.
+Twitter feed URL generation is controlled by `config/providers.yml`.
 
 ## Common Fields
 
@@ -9,8 +10,9 @@ It lets you tune source priority, default verticals, watchlist boosts, Hermes pr
 - `source_type`: One of `newsletter`, `pdf`, or `twitter`.
 - `priority`: `low`, `medium`, or `high`. Higher-priority sources get a scoring boost during classification.
 - `default_verticals`: Vertical priors that AEON should attach to items from this source.
-- `feed_url`: Optional RSS or Atom URL for Twitter feed ingestion. Plain `x.com` or `twitter.com` profile URLs are accepted as convenience input and normalized to RSSHub. If a Twitter source omits `feed_url`, AEON builds an RSSHub URL from the handle.
+- `feed_url`: Optional RSS or Atom URL for Twitter feed ingestion. Plain `x.com` or `twitter.com` profile URLs are accepted as convenience input and normalized through the configured Twitter provider. If a Twitter source omits `feed_url`, AEON builds a URL from the active provider and handle.
 - `twitter_handle`: Optional explicit Twitter handle field. AEON treats this the same as `handle`.
+- `twitter_feed_provider`: Optional per-source provider override such as `rsshub`, `nitter`, or `custom`.
 - `watchlist_boost`: Extra score to add when the item matches a watchlist entity.
 - `promotion_threshold_override`: Per-source Hermes promotion threshold.
 - `digest_enabled`: Set `false` to keep the source out of the daily digest.
@@ -55,7 +57,7 @@ sources:
 
 ## Add a Twitter Feed
 
-Use `source_type: twitter` and include a handle. AEON will generate an RSSHub feed URL automatically when `feed_url` is omitted.
+Use `source_type: twitter` and include a handle. AEON will generate a provider URL automatically when `feed_url` is omitted.
 
 ```yaml
 sources:
@@ -73,10 +75,27 @@ sources:
 AEON will resolve that source to:
 
 ```text
-https://rsshub.app/twitter/user/aaronjmars
+https://nitter.net/aaronjmars/rss
 ```
 
-If you need a different proxy, a self-hosted RSSHub instance, or a non-RSSHub feed, set `feed_url` explicitly and AEON will preserve it. Plain `x.com` and `twitter.com` profile URLs are not preserved; they are converted to RSSHub URLs during normalization.
+If you need a different proxy, a self-hosted RSSHub instance, or a non-RSSHub feed, update `config/providers.yml` or set `twitter_feed_provider` on the source entry. Plain `x.com` and `twitter.com` profile URLs are accepted as convenience input and normalized through the active provider.
+
+Example provider registry:
+
+```yaml
+twitter:
+  default_provider: nitter
+  providers:
+    rsshub:
+      type: rsshub
+      url_template: https://rsshub.app/twitter/user/{handle}
+    nitter:
+      type: nitter
+      url_template: https://nitter.net/{handle}/rss
+    custom:
+      type: custom
+      url_template: https://example.invalid/twitter/{handle}.xml
+```
 
 Then run the feed fetcher:
 
@@ -89,4 +108,4 @@ python3 scripts/ingestion/fetch_twitter.py --feeds
 - `priority` changes the scoring baseline during classification.
 - `promotion_threshold_override` is honored when AEON decides whether to promote an item to Hermes.
 - `digest_enabled` and `alert_enabled` are evaluated downstream, so turning them off keeps the source in the intake log without surfacing it in those outputs.
-- RSSHub is an external dependency, so feed availability depends on the endpoint staying reachable and the route continuing to return valid RSS or Atom XML.
+- Provider availability is external to AEON, so feed success depends on the configured endpoint staying reachable and continuing to return valid RSS or Atom XML.

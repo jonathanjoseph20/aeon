@@ -15,7 +15,6 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from source_config import (
     build_twitter_feed_url,
     load_source_entries,
-    normalize_feed_urls,
     normalize_handle,
     normalize_twitter_handle,
     normalize_source_type,
@@ -51,14 +50,17 @@ def collect_inputs(inputs):
     return files
 
 
-def load_twitter_sources(sources_path=Path("config/sources.yml")):
-    source_entries = load_source_entries(Path(sources_path))
+def load_twitter_sources(
+    sources_path=Path("config/sources.yml"),
+    providers_path=Path("config/providers.yml"),
+):
+    source_entries = load_source_entries(Path(sources_path), Path(providers_path))
     registry = {}
 
     for entry in source_entries:
         source_type = normalize_source_type(entry.get("source_type"))
 
-        if source_type != "twitter" and not normalize_feed_urls(entry):
+        if source_type != "twitter" and not entry.get("feed_urls"):
             continue
 
         handle = normalize_twitter_handle(entry)
@@ -73,7 +75,9 @@ def load_twitter_sources(sources_path=Path("config/sources.yml")):
             "importance_score": safe_int(entry.get("importance_score", 1)),
             "default_verticals": entry.get("default_verticals", []) or [],
             "verticals": entry.get("default_verticals", []) or entry.get("verticals", []) or [],
-            "feed_urls": normalize_feed_urls(entry),
+            "feed_urls": entry.get("feed_urls", []) or [],
+            "feed_provider": entry.get("feed_provider") or entry.get("twitter_feed_provider") or "explicit",
+            "generated_feed_url": entry.get("generated_feed_url") or entry.get("feed_url") or "",
             "watchlist_boost": safe_int(entry.get("watchlist_boost"), 0),
             "promotion_threshold_override": entry.get("promotion_threshold_override"),
             "digest_enabled": entry.get("digest_enabled", True),
@@ -476,10 +480,13 @@ def normalize_feed_record(feed_record, feed_url, handle, source_meta):
 def build_feed_records(feed_url, handle, source_meta, twitter_sources):
     checked_at = datetime.now(UTC).isoformat()
     source_name = source_meta.get("source_name") or handle or feed_url
+    provider = source_meta.get("feed_provider") or "explicit"
     health_record = {
         "source_name": source_name,
         "source_type": "twitter",
         "feed_url": feed_url,
+        "provider": provider,
+        "generated_feed_url": feed_url,
         "status": "ok",
         "error_reason": "",
         "checked_at": checked_at,
@@ -561,6 +568,11 @@ def main():
         help="YAML file containing Twitter/X source metadata and optional feed URLs."
     )
     parser.add_argument(
+        "--providers-file",
+        default="config/providers.yml",
+        help="YAML file containing Twitter feed provider templates and defaults."
+    )
+    parser.add_argument(
         "--feeds",
         action="store_true",
         help="Fetch configured RSS/Atom feed URLs from config/sources.yml."
@@ -577,7 +589,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     source_health_path = Path(args.source_health_path)
 
-    twitter_sources = load_twitter_sources(args.sources_file)
+    twitter_sources = load_twitter_sources(args.sources_file, args.providers_file)
     input_files = collect_inputs(args.inputs)
     wrote_anything = False
     feed_output_files = 0

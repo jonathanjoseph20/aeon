@@ -1,0 +1,17 @@
+# Twitter feed provider registry.
+#
+# Change `default_provider` to switch AEON-wide Twitter feed generation without code changes.
+# Per-source overrides can reference any provider name below.
+
+twitter:
+  default_provider: nitter
+  providers:
+    rsshub:
+      type: rsshub
+      url_template: https://rsshub.app/twitter/user/{handle}
+    nitter:
+      type: nitter
+      url_template: https://nitter.net/{handle}/rss
+    custom:
+      type: custom
+      url_template: https://example.invalid/twitter/{handle}.xml
