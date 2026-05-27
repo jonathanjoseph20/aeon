@@ -14,6 +14,23 @@ DEFAULT_INDEX_PATH = DEFAULT_WIKI_ROOT / "meta" / "aeon_index.jsonl"
 DEFAULT_NARRATIVE_SUMMARY_PATH = REPO_ROOT / "data" / "processed" / "narrative_summary.json"
 DEFAULT_FALLBACK_DATE = "1970-01-01"
 DEFAULT_MAX_TASKS = 12
+TASK_EXECUTION_STATES = (
+    "pending",
+    "acknowledged",
+    "in_progress",
+    "completed",
+    "failed",
+    "ignored",
+)
+TASK_TERMINAL_STATES = {"completed", "failed", "ignored"}
+TASK_STATE_TRANSITIONS = {
+    "pending": {"pending", "acknowledged", "in_progress", "completed", "failed", "ignored"},
+    "acknowledged": {"acknowledged", "in_progress", "completed", "failed", "ignored"},
+    "in_progress": {"in_progress", "completed", "failed", "ignored"},
+    "completed": {"completed"},
+    "failed": {"failed"},
+    "ignored": {"ignored"},
+}
 
 NARRATIVE_SECTION_TITLES = (
     "Top Narratives",
@@ -68,10 +85,38 @@ def load_jsonl(path):
     return records
 
 
+def append_jsonl(path, records):
+    if not records:
+        return
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("a", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
 def normalize_text(value):
     text = str(value or "")
     text = text.replace("\r", " ").replace("\n", " ")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize_task_state(value, default="pending"):
+    state = normalize_text(value).lower()
+
+    if state in TASK_EXECUTION_STATES:
+        return state
+
+    return default
+
+
+def task_state_allows_transition(current_state, next_state):
+    current = normalize_task_state(current_state)
+    target = normalize_task_state(next_state)
+
+    return target in TASK_STATE_TRANSITIONS.get(current, {current})
 
 
 def unique_text_list(values):
@@ -408,6 +453,175 @@ def related_record_titles(records):
     return unique_text_list(titles)
 
 
+def repo_relative_path(path):
+    if not path:
+        return ""
+
+    path = Path(path)
+
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def evidence_record_key(record):
+    return normalize_text(
+        record.get("memory_id")
+        or record.get("evidence_id")
+        or record.get("file_path")
+        or record.get("title")
+    ).lower()
+
+
+def build_evidence_record(record):
+    return {
+        "evidence_id": normalize_text(
+            record.get("memory_id")
+            or record.get("file_path")
+            or record.get("title")
+        ),
+        "memory_id": normalize_text(record.get("memory_id")),
+        "file_path": normalize_text(record.get("file_path")),
+        "title": normalize_text(record.get("title") or record.get("subject")),
+        "source": source_name_for_record(record),
+        "source_type": normalize_text(record.get("source_type")),
+        "source_url": normalize_text(record.get("source_url")),
+        "timestamp": normalize_text(record.get("timestamp")),
+        "partition_date": normalize_text(record.get("partition_date")),
+        "canonical_entities": unique_text_list(record.get("canonical_entities") or []),
+        "narrative_membership": unique_text_list(record.get("narrative_membership") or []),
+    }
+
+
+def evidence_sort_key(record):
+    timestamp = parse_iso_datetime(record.get("timestamp"))
+    return (
+        timestamp.isoformat() if timestamp is not None else "",
+        normalize_text(record.get("memory_id") or record.get("evidence_id")).lower(),
+        normalize_text(record.get("title")).lower(),
+    )
+
+
+def build_task_lineage(task_id, task_key, category, candidate_kind, narrative_name, canonical_entities, evidence_records, daily_path, weekly_path):
+    deduped = {}
+
+    for record in evidence_records or []:
+        key = evidence_record_key(record)
+
+        if not key:
+            continue
+
+        if key not in deduped:
+            deduped[key] = dict(record)
+
+    ordered_evidence = sorted(deduped.values(), key=evidence_sort_key)
+    evidence_ids = unique_text_list(
+        [
+            normalize_text(record.get("memory_id") or record.get("evidence_id"))
+            for record in ordered_evidence
+        ]
+    )
+    synthesis_refs = unique_text_list(
+        [repo_relative_path(daily_path), repo_relative_path(weekly_path)]
+    )
+
+    entities = []
+
+    for entity_name in unique_text_list(canonical_entities):
+        entity_ids = []
+
+        for record in ordered_evidence:
+            if entity_name in unique_text_list(record.get("canonical_entities") or []):
+                entity_ids.append(normalize_text(record.get("memory_id") or record.get("evidence_id")))
+
+        entities.append(
+            {
+                "name": entity_name,
+                "source_ids": unique_text_list(entity_ids),
+            }
+        )
+
+    return {
+        "task_id": task_id,
+        "task_key": task_key,
+        "category": category,
+        "narrative": {
+            "name": narrative_name,
+            "kind": candidate_kind,
+            "source_ids": evidence_ids,
+            "synthesis_refs": synthesis_refs,
+        },
+        "entities": entities,
+        "source_evidence": ordered_evidence,
+    }
+
+
+def build_execution_history_entry(task_id, state, timestamp, source, note="", update_id=""):
+    entry = {
+        "state": normalize_task_state(state),
+        "timestamp": normalize_text(timestamp),
+        "source": normalize_text(source),
+    }
+
+    task_identifier = normalize_text(task_id)
+
+    if task_identifier:
+        entry["task_id"] = task_identifier
+        entry["task_key"] = task_identifier
+
+    if note:
+        entry["note"] = normalize_text(note)
+
+    if update_id:
+        entry["update_id"] = normalize_text(update_id)
+
+    return entry
+
+
+def build_task_completion_memory_id(task_key, completed_at):
+    completed_at_text = normalize_text(completed_at)[:10] or DEFAULT_FALLBACK_DATE
+    fingerprint = f"{normalize_text(task_key)}\n{normalize_text(completed_at)}"
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:12]
+    return f"task-completion-{completed_at_text}-{digest}"
+
+
+def build_completion_memory_record(task, update, completed_at):
+    task_id = normalize_text(task.get("task_id"))
+    task_key = normalize_text(task.get("task_key") or task_id)
+    completion_memory_id = build_task_completion_memory_id(task_key, completed_at)
+    lineage = task.get("lineage") or {}
+    narrative = lineage.get("narrative") or {}
+
+    return {
+        "memory_id": completion_memory_id,
+        "title": f"Completed task: {normalize_text(task.get('narrative') or narrative.get('name') or task_id)}",
+        "source": "Midas task execution",
+        "source_type": "task_execution",
+        "timestamp": normalize_text(completed_at),
+        "indexed_at": normalize_text(completed_at),
+        "partition_date": normalize_text(completed_at)[:10] or DEFAULT_FALLBACK_DATE,
+        "task_id": task_id,
+        "task_key": task_key,
+        "task_date": normalize_text(task.get("task_date")),
+        "task_state": "completed",
+        "task_category": normalize_text(task.get("category")),
+        "task_narrative": normalize_text(task.get("narrative") or narrative.get("name")),
+        "task_update_id": normalize_text(update.get("update_id")),
+        "task_update_state": normalize_task_state(update.get("state")),
+        "task_update_source": normalize_text(update.get("source") or update.get("actor") or "midas"),
+        "canonical_entities": unique_text_list(task.get("canonical_entities") or []),
+        "narrative_membership": unique_text_list(
+            [normalize_text(task.get("narrative") or narrative.get("name"))]
+        ),
+        "synthesis_refs": unique_text_list(
+            task.get("synthesis_refs") or narrative.get("synthesis_refs") or []
+        ),
+        "lineage": lineage,
+        "result": normalize_text(update.get("result") or update.get("note")),
+    }
+
+
 def build_task_id(category, narrative, canonical_entities):
     canonical_part = "|".join(sorted(normalize_text(value).lower() for value in canonical_entities))
     fingerprint = normalize_text(category).lower() + "\n" + normalize_text(narrative).lower() + "\n" + canonical_part
@@ -584,6 +798,22 @@ def merge_candidate(dest, candidate):
     dest_refs.update(candidate.get("_source_refs") or [])
     dest["_source_refs"] = sorted(dest_refs)
 
+    dest_evidence = {}
+
+    for record in dest.get("_evidence_records") or []:
+        key = evidence_record_key(record)
+
+        if key and key not in dest_evidence:
+            dest_evidence[key] = dict(record)
+
+    for record in candidate.get("_evidence_records") or []:
+        key = evidence_record_key(record)
+
+        if key and key not in dest_evidence:
+            dest_evidence[key] = dict(record)
+
+    dest["_evidence_records"] = sorted(dest_evidence.values(), key=evidence_sort_key)
+
     return dest
 
 
@@ -610,12 +840,30 @@ def dedupe_candidates(candidates):
 
 def finalize_task(candidate):
     source_refs = unique_text_list(candidate.get("_source_refs") or [])
+    evidence_records = candidate.get("_evidence_records") or []
+    task_id = build_task_id(
+        candidate["category"],
+        candidate["narrative"],
+        candidate.get("canonical_entities") or [],
+    )
+    task_date = normalize_text(candidate.get("created_at"))[:10] or DEFAULT_FALLBACK_DATE
+    task_key = f"{task_date}:{task_id}"
+    lineage = build_task_lineage(
+        task_id,
+        task_key,
+        candidate["category"],
+        candidate.get("candidate_kind") or "narrative",
+        candidate["narrative"],
+        candidate.get("canonical_entities") or [],
+        evidence_records,
+        candidate.get("daily_path"),
+        candidate.get("weekly_path"),
+    )
+    synthesis_refs = unique_text_list(
+        [repo_relative_path(candidate.get("daily_path")), repo_relative_path(candidate.get("weekly_path"))]
+    )
     task = {
-        "task_id": build_task_id(
-            candidate["category"],
-            candidate["narrative"],
-            candidate.get("canonical_entities") or [],
-        ),
+        "task_id": task_id,
         "created_at": candidate["created_at"],
         "priority": safe_int(candidate.get("priority"), 0),
         "category": candidate["category"],
@@ -638,6 +886,23 @@ def finalize_task(candidate):
         "promotion_count": safe_int(candidate.get("promotion_count"), 0),
         "confidence": safe_int(candidate.get("confidence"), 0),
         "status": "open",
+        "task_date": task_date,
+        "task_key": task_key,
+        "execution_state": "pending",
+        "execution_state_updated_at": candidate["created_at"],
+        "execution_history": [
+            build_execution_history_entry(
+                task_key,
+                "pending",
+                candidate["created_at"],
+                "hermes",
+                "Task created from deterministic synthesis.",
+                f"{task_key}::created::{candidate['created_at']}",
+            )
+        ],
+        "lineage": lineage,
+        "synthesis_refs": synthesis_refs,
+        "source_evidence_count": len(lineage.get("source_evidence") or []),
     }
 
     if source_refs:
@@ -723,6 +988,7 @@ def build_narrative_candidate(
         "daily_path": daily_path,
         "weekly_path": weekly_path,
         "_source_refs": [str(path) for path in (daily_path, weekly_path) if path],
+        "_evidence_records": [build_evidence_record(record) for record in records],
         "base_priority": base_priority,
         "candidate_kind": "narrative",
     }
@@ -802,6 +1068,7 @@ def build_entity_candidate(
         "daily_path": daily_path,
         "weekly_path": weekly_path,
         "_source_refs": [str(path) for path in (daily_path, weekly_path) if path],
+        "_evidence_records": [build_evidence_record(record) for record in records],
         "base_priority": base_priority,
         "candidate_kind": "entity",
         "related_narratives": related_narratives,

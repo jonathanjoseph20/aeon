@@ -6,7 +6,9 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = REPO_ROOT / "scripts" / "hermes" / "build_tasks.py"
+BUILD_TASKS_PATH = REPO_ROOT / "scripts" / "hermes" / "build_tasks.py"
+EXPORT_TASKS_PATH = REPO_ROOT / "scripts" / "hermes" / "export_tasks.py"
+IMPORT_TASK_UPDATES_PATH = REPO_ROOT / "scripts" / "hermes" / "import_task_updates.py"
 
 
 def load_module(module_name, module_path):
@@ -17,7 +19,9 @@ def load_module(module_name, module_path):
     return module
 
 
-build_tasks = load_module("build_tasks", MODULE_PATH)
+build_tasks = load_module("build_tasks_coordination", BUILD_TASKS_PATH)
+export_tasks = load_module("export_tasks_coordination", EXPORT_TASKS_PATH)
+import_task_updates = load_module("import_task_updates_coordination", IMPORT_TASK_UPDATES_PATH)
 
 
 def write_jsonl(path, records):
@@ -47,22 +51,12 @@ def write_markdown(path, title, narrative_lines, entity_lines):
     if entity_lines:
         lines.extend(["", "## Portfolio / Watchlist Relevance", *entity_lines])
 
-    lines.extend(
-        [
-            "",
-            "## Suggested Follow-ups for Midas",
-            *[
-                line
-                for line in narrative_lines[:1]
-            ],
-            "",
-        ]
-    )
+    lines.extend(["", "## Suggested Follow-ups for Midas", *narrative_lines[:1], ""])
 
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-class BuildTasksTests(unittest.TestCase):
+class TaskCoordinationTests(unittest.TestCase):
     def write_fixture(self, temp_dir):
         temp_dir = Path(temp_dir)
         wiki_root = temp_dir / "workspace" / "wiki"
@@ -189,40 +183,6 @@ class BuildTasksTests(unittest.TestCase):
             },
         )
 
-        daily_markdown = "\n".join(
-            [
-                "# Hermes Synthesis Memo",
-                "",
-                "## Top Narratives",
-                "- `OpenRouter expansion` | priority `96` | confidence `94` | sources `3` | entities `OpenRouter, AI` | records `3`",
-                "- `Venice/Dolphin thesis` | priority `88` | confidence `95` | sources `2` | entities `Venice, Dolphin` | records `2`",
-                "",
-                "## Portfolio / Watchlist Relevance",
-                "- `Venice` | priority `130` | confidence `97` | sources `4` | narratives `Venice/Dolphin thesis` | records `2`",
-                "- `OpenRouter` | priority `82` | confidence `94` | sources `3` | narratives `OpenRouter expansion` | records `2`",
-                "",
-                "## Suggested Follow-ups for Midas",
-                "- Review `OpenRouter expansion` for Midas: `3` sources, confidence `94`, entity priority `82`.",
-                "",
-            ]
-        )
-
-        weekly_markdown = "\n".join(
-            [
-                "# Hermes Synthesis Memo",
-                "",
-                "## Top Narratives",
-                "- `OpenRouter expansion` | priority `96` | confidence `94` | sources `3` | entities `OpenRouter, AI` | records `3`",
-                "",
-                "## Portfolio / Watchlist Relevance",
-                "- `Venice` | priority `130` | confidence `97` | sources `4` | narratives `Venice/Dolphin thesis` | records `2`",
-                "",
-                "## Suggested Follow-ups for Midas",
-                "- Review `Venice/Dolphin thesis` for Midas: `2` sources, confidence `95`, entity priority `130`.",
-                "",
-            ]
-        )
-
         write_markdown(
             wiki_root / "synthesis" / "daily" / "2026-05-25.md",
             "daily",
@@ -248,130 +208,182 @@ class BuildTasksTests(unittest.TestCase):
 
         return wiki_root, index_path, narrative_summary_path
 
-    def test_rising_narrative_generates_task(self):
+    def read_jsonl(self, path):
+        return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def test_export_tasks_writes_queue_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            wiki_root, index_path, narrative_summary_path = self.write_fixture(temp_dir)
-
-            result = build_tasks.build_tasks(
+            wiki_root, _index_path, narrative_summary_path = self.write_fixture(temp_dir)
+            build_tasks.build_tasks(
                 wiki_root=wiki_root,
-                index_path=index_path,
+                index_path=wiki_root / "meta" / "aeon_index.jsonl",
                 narrative_summary_path=narrative_summary_path,
                 target_date="2026-05-25",
             )
 
-            self.assertTrue(result["output_path"].exists())
-            self.assertGreaterEqual(result["task_count"], 2)
-            self.assertEqual(result["tasks"][0]["narrative"], "Venice")
-
-            narratives = {task["narrative"] for task in result["tasks"]}
-            self.assertIn("OpenRouter expansion", narratives)
-
-    def test_duplicate_rerun_suppression(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            wiki_root, index_path, narrative_summary_path = self.write_fixture(temp_dir)
-
-            first = build_tasks.build_tasks(
+            result = export_tasks.export_tasks(
                 wiki_root=wiki_root,
-                index_path=index_path,
-                narrative_summary_path=narrative_summary_path,
+                outbox_dir=Path(temp_dir) / "data" / "outbox" / "midas" / "tasks",
                 target_date="2026-05-25",
             )
-            second = build_tasks.build_tasks(
+            second = export_tasks.export_tasks(
                 wiki_root=wiki_root,
-                index_path=index_path,
-                narrative_summary_path=narrative_summary_path,
+                outbox_dir=Path(temp_dir) / "data" / "outbox" / "midas" / "tasks",
                 target_date="2026-05-25",
             )
 
-            self.assertTrue(first["output_written"])
+            records = self.read_jsonl(result["outbox_path"])
+
+            self.assertTrue(result["output_written"])
             self.assertFalse(second["output_written"])
-            self.assertEqual(first["tasks"], second["tasks"])
+            self.assertEqual(result["exported_count"], result["task_count"])
+            self.assertEqual(len(records), result["task_count"])
+            self.assertEqual(records[0]["execution_state"], "pending")
+            self.assertEqual(records[0]["state"], "pending")
+            self.assertIn("task_key", records[0])
+            self.assertEqual(records, self.read_jsonl(second["outbox_path"]))
 
-    def test_deterministic_task_ids(self):
+    def test_import_updates_merges_state_transitions_and_completion_memory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             wiki_root, index_path, narrative_summary_path = self.write_fixture(temp_dir)
-
-            first = build_tasks.build_tasks(
-                wiki_root=wiki_root,
-                index_path=index_path,
-                narrative_summary_path=narrative_summary_path,
-                target_date="2026-05-25",
-            )
-            second = build_tasks.build_tasks(
+            build_result = build_tasks.build_tasks(
                 wiki_root=wiki_root,
                 index_path=index_path,
                 narrative_summary_path=narrative_summary_path,
                 target_date="2026-05-25",
             )
 
+            tasks = build_result["tasks"]
+            first_task = tasks[0]
+            second_task = tasks[1]
+
+            inbox_dir = Path(temp_dir) / "data" / "inbox" / "midas" / "task_updates"
+            write_jsonl(
+                inbox_dir / "2026-05-25.jsonl",
+                [
+                    {
+                        "task_id": first_task["task_id"],
+                        "task_key": first_task["task_key"],
+                        "task_date": first_task["task_date"],
+                        "state": "acknowledged",
+                        "timestamp": "2026-05-25T09:00:00+00:00",
+                        "source": "midas",
+                        "note": "acknowledged",
+                        "update_id": "update-ack-1",
+                    },
+                    {
+                        "task_id": first_task["task_id"],
+                        "task_key": first_task["task_key"],
+                        "task_date": first_task["task_date"],
+                        "state": "acknowledged",
+                        "timestamp": "2026-05-25T09:00:00+00:00",
+                        "source": "midas",
+                        "note": "acknowledged",
+                        "update_id": "update-ack-1",
+                    },
+                    {
+                        "task_id": first_task["task_id"],
+                        "task_key": first_task["task_key"],
+                        "task_date": first_task["task_date"],
+                        "state": "in_progress",
+                        "timestamp": "2026-05-25T10:00:00+00:00",
+                        "source": "midas",
+                        "note": "in progress",
+                        "update_id": "update-progress-1",
+                    },
+                    {
+                        "task_id": first_task["task_id"],
+                        "task_key": first_task["task_key"],
+                        "task_date": first_task["task_date"],
+                        "state": "completed",
+                        "timestamp": "2026-05-25T11:00:00+00:00",
+                        "source": "midas",
+                        "note": "completed",
+                        "update_id": "update-complete-1",
+                    },
+                    {
+                        "task_id": first_task["task_id"],
+                        "task_key": first_task["task_key"],
+                        "task_date": first_task["task_date"],
+                        "state": "completed",
+                        "timestamp": "2026-05-25T11:00:00+00:00",
+                        "source": "midas",
+                        "note": "completed",
+                        "update_id": "update-complete-1",
+                    },
+                    {
+                        "task_id": second_task["task_id"],
+                        "task_key": second_task["task_key"],
+                        "task_date": second_task["task_date"],
+                        "state": "ignored",
+                        "timestamp": "2026-05-25T08:00:00+00:00",
+                        "source": "midas",
+                        "note": "ignored",
+                        "update_id": "update-ignore-1",
+                    },
+                    {
+                        "task_id": second_task["task_id"],
+                        "task_key": second_task["task_key"],
+                        "task_date": second_task["task_date"],
+                        "state": "in_progress",
+                        "timestamp": "2026-05-25T09:00:00+00:00",
+                        "source": "midas",
+                        "note": "late progress",
+                        "update_id": "update-invalid-1",
+                    },
+                ],
+            )
+
+            result = import_task_updates.merge_updates(
+                wiki_root=wiki_root,
+                index_path=index_path,
+                inbox_dir=inbox_dir,
+            )
+            second_pass = import_task_updates.merge_updates(
+                wiki_root=wiki_root,
+                index_path=index_path,
+                inbox_dir=inbox_dir,
+            )
+
+            updated_tasks = json.loads(build_result["output_path"].read_text(encoding="utf-8"))
+            first_updated = next(task for task in updated_tasks if task["task_key"] == first_task["task_key"])
+            second_updated = next(task for task in updated_tasks if task["task_key"] == second_task["task_key"])
+            index_records = self.read_jsonl(index_path)
+            completion_records = [record for record in index_records if record.get("task_id") == first_task["task_id"]]
+
+            self.assertEqual(result["applied_update_count"], 4)
+            self.assertEqual(result["duplicate_update_count"], 2)
+            self.assertEqual(result["invalid_update_count"], 1)
+            self.assertEqual(first_updated["execution_state"], "completed")
+            self.assertEqual(first_updated["status"], "closed")
             self.assertEqual(
-                [task["task_id"] for task in first["tasks"]],
-                [task["task_id"] for task in second["tasks"]],
+                [entry["state"] for entry in first_updated["execution_history"]],
+                ["pending", "acknowledged", "in_progress", "completed"],
             )
-
-    def test_high_priority_entities_rank_higher(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            wiki_root, index_path, narrative_summary_path = self.write_fixture(temp_dir)
-
-            result = build_tasks.build_tasks(
-                wiki_root=wiki_root,
-                index_path=index_path,
-                narrative_summary_path=narrative_summary_path,
-                target_date="2026-05-25",
-            )
-
-            top_task = result["tasks"][0]
-            second_task = result["tasks"][1]
-
-            self.assertGreaterEqual(top_task["priority"], second_task["priority"])
-            self.assertEqual(top_task["narrative"], "Venice")
-
-    def test_synthesis_links_preserved(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            wiki_root, index_path, narrative_summary_path = self.write_fixture(temp_dir)
-
-            result = build_tasks.build_tasks(
-                wiki_root=wiki_root,
-                index_path=index_path,
-                narrative_summary_path=narrative_summary_path,
-                target_date="2026-05-25",
-            )
-
-            reason = result["tasks"][0]["reason"]
-            self.assertIn("workspace/wiki/synthesis/daily/2026-05-25.md", reason)
-            self.assertIn("workspace/wiki/synthesis/weekly/2026-22.md", reason)
-
-    def test_lineage_and_state_model_are_deterministic(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            wiki_root, index_path, narrative_summary_path = self.write_fixture(temp_dir)
-
-            first = build_tasks.build_tasks(
-                wiki_root=wiki_root,
-                index_path=index_path,
-                narrative_summary_path=narrative_summary_path,
-                target_date="2026-05-25",
-            )
-            second = build_tasks.build_tasks(
-                wiki_root=wiki_root,
-                index_path=index_path,
-                narrative_summary_path=narrative_summary_path,
-                target_date="2026-05-25",
-            )
-
-            task = first["tasks"][0]
-
-            self.assertEqual(task["execution_state"], "pending")
-            self.assertEqual(task["task_date"], "2026-05-25")
-            self.assertEqual(task["task_key"], f"2026-05-25:{task['task_id']}")
-            self.assertEqual(task["execution_history"][0]["state"], "pending")
-            self.assertEqual(task["lineage"]["task_id"], task["task_id"])
-            self.assertEqual(task["lineage"]["task_key"], task["task_key"])
-            self.assertEqual(task["lineage"]["narrative"]["name"], task["narrative"])
-            self.assertTrue(task["lineage"]["narrative"]["synthesis_refs"])
-            self.assertTrue(task["lineage"]["source_evidence"])
+            self.assertTrue(first_updated["completion_memory_id"])
+            self.assertEqual(second_updated["execution_state"], "ignored")
+            self.assertEqual(second_updated["status"], "closed")
             self.assertEqual(
-                [entry["state"] for entry in first["tasks"][0]["execution_history"]],
-                [entry["state"] for entry in second["tasks"][0]["execution_history"]],
+                [entry["state"] for entry in second_updated["execution_history"]],
+                ["pending", "ignored"],
+            )
+            self.assertTrue(completion_records)
+            self.assertEqual(completion_records[-1]["task_state"], "completed")
+            self.assertEqual(completion_records[-1]["canonical_entities"], first_task["canonical_entities"])
+            self.assertEqual(completion_records[-1]["narrative_membership"], [first_task["narrative"]])
+            self.assertTrue(completion_records[-1]["synthesis_refs"])
+            self.assertEqual(second_pass["task_file_writes"], 0)
+            self.assertEqual(second_pass["index_writes"], 0)
+            post_import_export = export_tasks.export_tasks(
+                wiki_root=wiki_root,
+                outbox_dir=Path(temp_dir) / "data" / "outbox" / "midas" / "tasks",
+                target_date="2026-05-25",
+            )
+            self.assertEqual(post_import_export["exported_count"], build_result["task_count"] - 2)
+            self.assertEqual(post_import_export["skipped_terminal_count"], 2)
+            self.assertEqual(
+                [entry["state"] for entry in first_updated["execution_history"]],
+                [entry["state"] for entry in json.loads(build_result["output_path"].read_text(encoding="utf-8"))[0]["execution_history"]],
             )
 
 
