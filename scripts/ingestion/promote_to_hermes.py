@@ -1,19 +1,78 @@
 import argparse
 import hashlib
 import json
-from datetime import datetime, UTC
+import re
+import sys
+from collections import defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[1]
+
+for path in (REPO_ROOT, SCRIPT_DIR):
+    path_str = str(path)
+
+    if path_str not in sys.path:
+        sys.path.append(path_str)
+
+from build_entity_summary import (  # noqa: E402
+    classify_trend,
+    extract_entities,
+    load_configured_entities,
+    parse_timestamp,
+)
 
 
 DEFAULT_INPUT_LOG = Path("data/processed/intake_log.jsonl")
 DEFAULT_EVENT_DIR = Path("data/events/promote_to_hermes")
 DEFAULT_HERMES_DIR = Path("data/hermes/promoted")
 DEFAULT_IMPORTANCE_THRESHOLD = 7
+DEFAULT_PROMOTION_SCORE_THRESHOLD = 7.5
+DEFAULT_MIN_SIGNAL_COUNT = 2
+DEFAULT_WEIGHTS = {
+    "alert_severity": 5.0,
+    "source_priority": {
+        "high": 4.0,
+        "medium": 2.0,
+        "low": 0.0,
+    },
+    "watchlist": 3.5,
+    "entity_trend": 3.0,
+    "source_diversity": 2.5,
+}
+HIGH_IMPORTANCE_SIGNAL_THRESHOLD = 8
+LOW_INFORMATION_TWEET_WORD_LIMIT = 18
+GENERIC_MARKET_COMMENTARY_PATTERNS = (
+    r"\bmarket wrap\b",
+    r"\bmarket commentary\b",
+    r"\bweekly market\b",
+    r"\bwatching the tape\b",
+    r"\bwatching markets\b",
+    r"\bmarket feels\b",
+    r"\brisk on\b",
+    r"\brisk off\b",
+    r"\bstocks? (are |is )?(higher|lower|mixed)\b",
+    r"\bbonds? (are |is )?(higher|lower|mixed)\b",
+    r"\bjust another day\b",
+)
+GENERIC_MARKET_COMMENTARY_RE = re.compile(
+    "|".join(f"(?:{pattern})" for pattern in GENERIC_MARKET_COMMENTARY_PATTERNS),
+    re.IGNORECASE,
+)
 
 
 def safe_int(value, default=0):
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_float(value, default=0.0):
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return default
 
@@ -72,6 +131,10 @@ def first_non_empty(*values):
 
 def safe_text(value):
     return str(value or "").strip()
+
+
+def normalize_whitespace(value):
+    return re.sub(r"\s+", " ", safe_text(value)).strip()
 
 
 def build_signal_band(item):
@@ -134,25 +197,7 @@ def get_effective_threshold(item, threshold):
     if override in (None, ""):
         return threshold
 
-    return safe_int(override, threshold)
-
-
-def get_reasons(item, threshold):
-    reasons = []
-    score = get_importance_score(item)
-    signal_band = build_signal_band(item)
-    threshold = get_effective_threshold(item, threshold)
-
-    if score > threshold:
-        reasons.append(f"importance_score>{threshold}")
-
-    if item.get("watchlist_hits"):
-        reasons.append("watchlist_hit")
-
-    if signal_band == "High Signal":
-        reasons.append("signal_band=High Signal")
-
-    return reasons
+    return safe_float(override, threshold)
 
 
 def build_summary_and_preview(item):
@@ -180,17 +225,376 @@ def unique_tags(item):
     return tags
 
 
-def build_notification_payload(source_name, signal_band, importance_score, summary):
-    text = "AEON promoted {} ({}, score {}): {}".format(
+def build_notification_payload(source_name, signal_band, importance_score, confidence, summary):
+    text = "AEON promoted {} ({}, score {}, confidence {}): {}".format(
         source_name or "Unknown source",
         signal_band,
         importance_score,
+        confidence,
         summary or "No summary available",
     )
 
     return {
-        "text": text[:2800]
+        "text": text[:2800],
+        "confidence": confidence,
     }
+
+
+def build_narrative_signature(item):
+    parts = [
+        item.get("subject"),
+        item.get("summary"),
+        item.get("content_preview") or item.get("preview"),
+        item.get("content"),
+        item.get("raw_text"),
+    ]
+    cleaned = [normalize_whitespace(part).lower() for part in parts if normalize_whitespace(part)]
+
+    if not cleaned:
+        fallback_parts = [
+            safe_text(item.get("source_name")).lower(),
+            safe_text(item.get("source_url")).lower(),
+        ]
+        cleaned = [part for part in fallback_parts if part]
+
+    return hashlib.sha256(" || ".join(cleaned).encode("utf-8")).hexdigest()[:16]
+
+
+def build_item_text(item):
+    return normalize_whitespace(
+        " ".join(
+            part
+            for part in (
+                item.get("subject"),
+                item.get("summary"),
+                item.get("content_preview") or item.get("preview"),
+                item.get("content"),
+                item.get("raw_text"),
+                item.get("source_name"),
+            )
+            if safe_text(part)
+        )
+    )
+
+
+def is_low_information_tweet(item, item_text):
+    if safe_text(item.get("source_type")).lower() != "twitter":
+        return False
+
+    if item.get("watchlist_hits"):
+        return False
+
+    if get_importance_score(item) >= HIGH_IMPORTANCE_SIGNAL_THRESHOLD:
+        return False
+
+    word_count = len(re.findall(r"\b\w+\b", item_text))
+    return word_count < LOW_INFORMATION_TWEET_WORD_LIMIT
+
+
+def is_generic_market_commentary(item, item_text):
+    if item.get("watchlist_hits"):
+        return False
+
+    if get_importance_score(item) >= HIGH_IMPORTANCE_SIGNAL_THRESHOLD:
+        return False
+
+    return bool(GENERIC_MARKET_COMMENTARY_RE.search(item_text))
+
+
+def build_entity_context(items):
+    configured_entities = load_configured_entities()
+    entity_aggregates = {}
+    item_entity_keys = []
+
+    for index, item in enumerate(items):
+        item_text = build_item_text(item)
+        extracted = extract_entities(item_text, configured_entities=configured_entities)
+        unique_entities = []
+        seen_keys = set()
+
+        for entity in extracted:
+            entity_key = entity["entity_key"]
+
+            if entity_key in seen_keys:
+                continue
+
+            seen_keys.add(entity_key)
+            unique_entities.append(entity)
+
+        item_entity_keys.append([entity["entity_key"] for entity in unique_entities])
+
+        item_timestamp = parse_timestamp(item.get("timestamp") or item.get("created_at"))
+        item_importance = get_importance_score(item)
+        source_name = safe_text(item.get("source_name") or "Unknown")
+        source_type = safe_text(item.get("source_type"))
+
+        for entity in unique_entities:
+            key = entity["entity_key"]
+            aggregate = entity_aggregates.setdefault(
+                key,
+                {
+                    "entity_key": key,
+                    "entity_name": entity["entity_name"],
+                    "mention_count": 0,
+                    "source_names": set(),
+                    "source_types": set(),
+                    "importance_total": 0,
+                    "mentions": [],
+                },
+            )
+
+            aggregate["mention_count"] += 1
+            aggregate["source_names"].add(source_name)
+            aggregate["source_types"].add(source_type)
+            aggregate["importance_total"] += item_importance
+            aggregate["mentions"].append(
+                {
+                    "timestamp": item_timestamp.isoformat() if item_timestamp else "",
+                    "importance_score": item_importance,
+                    "index": index,
+                }
+            )
+
+    resolved_aggregates = {}
+
+    for key, aggregate in entity_aggregates.items():
+        trend_label, trend_score = classify_trend(aggregate["mentions"])
+        source_names = sorted(aggregate["source_names"])
+        source_types = sorted(aggregate["source_types"])
+        mention_count = aggregate["mention_count"]
+
+        resolved_aggregates[key] = {
+            "entity_key": key,
+            "entity_name": aggregate["entity_name"],
+            "mention_count": mention_count,
+            "source_names": source_names,
+            "source_types": source_types,
+            "source_diversity": len(source_names),
+            "source_type_diversity": len(source_types),
+            "average_importance_score": round(
+                aggregate["importance_total"] / mention_count, 2
+            ) if mention_count else 0.0,
+            "trend_label": trend_label,
+            "trend_score": trend_score,
+        }
+
+    item_entity_contexts = []
+
+    for entity_keys in item_entity_keys:
+        item_entity_contexts.append(
+            [
+                resolved_aggregates[key]
+                for key in entity_keys
+                if key in resolved_aggregates
+            ]
+        )
+
+    return item_entity_contexts
+
+
+def build_promotion_evidence(item, entity_contexts, weights, importance_threshold):
+    item_text = build_item_text(item)
+    signal_threshold = safe_float(
+        item.get("promotion_threshold_override"),
+        importance_threshold,
+    )
+    importance_score = get_importance_score(item)
+    source_priority = safe_text(item.get("priority") or "low").lower()
+    signal_count = 0
+    score = 0.0
+    reasons = []
+    signal_details = []
+    entity_evidence = []
+
+    if importance_score >= signal_threshold:
+        signal_count += 1
+        severity_component = round(
+            weights["alert_severity"] * min(importance_score / max(signal_threshold, 1), 1.5),
+            2,
+        )
+        score += severity_component
+        reasons.append(f"importance_score>={signal_threshold:g}")
+        signal_details.append(
+            {
+                "signal": "high_importance",
+                "value": importance_score,
+                "threshold": signal_threshold,
+                "weight": weights["alert_severity"],
+                "score_component": severity_component,
+            }
+        )
+
+    priority_weight = weights["source_priority"].get(source_priority, 0.0)
+    if priority_weight > 0:
+        signal_count += 1
+        score += priority_weight
+        reasons.append(f"source_priority={source_priority}")
+        signal_details.append(
+            {
+                "signal": "source_priority",
+                "value": source_priority,
+                "threshold": "high",
+                "weight": priority_weight,
+                "score_component": priority_weight,
+            }
+        )
+
+    watchlist_hits = item.get("watchlist_hits") or []
+    if watchlist_hits:
+        signal_count += 1
+        watchlist_component = weights["watchlist"]
+
+        for hit in watchlist_hits:
+            watchlist_component += safe_float(hit.get("score_boost"), 0.0)
+
+        score += watchlist_component
+        hit_names = ", ".join(
+            normalize_whitespace(hit.get("entity"))
+            for hit in watchlist_hits
+            if safe_text(hit.get("entity"))
+        )
+        reasons.append(
+            f"watchlist_hit{f':{hit_names}' if hit_names else ''}"
+        )
+        signal_details.append(
+            {
+                "signal": "watchlist_hit",
+                "value": [hit.get("entity") for hit in watchlist_hits],
+                "threshold": "any",
+                "weight": weights["watchlist"],
+                "score_component": round(watchlist_component, 2),
+            }
+        )
+
+    best_entity = None
+    best_trend_entity = None
+    best_trend_score = 0.0
+
+    for entity in entity_contexts:
+        if best_entity is None:
+            best_entity = entity
+        elif (
+            entity["source_diversity"] > best_entity["source_diversity"]
+            or (
+                entity["source_diversity"] == best_entity["source_diversity"]
+                and entity["source_type_diversity"] > best_entity["source_type_diversity"]
+            )
+            or (
+                entity["source_diversity"] == best_entity["source_diversity"]
+                and entity["source_type_diversity"] == best_entity["source_type_diversity"]
+                and entity["mention_count"] > best_entity["mention_count"]
+            )
+        ):
+            best_entity = entity
+
+        if entity["trend_score"] > best_trend_score:
+            best_trend_score = entity["trend_score"]
+            best_trend_entity = entity
+
+    if best_entity and best_entity["source_diversity"] >= 2:
+        signal_count += 1
+        source_diversity_component = weights["source_diversity"]
+        score += source_diversity_component
+        reasons.append(
+            f"cross_source_entity={best_entity['entity_name']}:{best_entity['source_diversity']} sources"
+        )
+        signal_details.append(
+            {
+                "signal": "cross_source_entity_reinforcement",
+                "value": {
+                    "entity": best_entity["entity_name"],
+                    "source_diversity": best_entity["source_diversity"],
+                    "source_type_diversity": best_entity["source_type_diversity"],
+                },
+                "threshold": 2,
+                "weight": weights["source_diversity"],
+                "score_component": source_diversity_component,
+            }
+        )
+        entity_evidence.append(best_entity)
+
+    if best_entity and best_entity["source_type_diversity"] >= 2:
+        signal_count += 1
+        source_type_component = round(weights["source_diversity"] * 0.85, 2)
+        score += source_type_component
+        reasons.append(
+            f"source_diversity={best_entity['source_type_diversity']} source types"
+        )
+        signal_details.append(
+            {
+                "signal": "source_diversity",
+                "value": best_entity["source_type_diversity"],
+                "threshold": 2,
+                "weight": round(weights["source_diversity"] * 0.85, 2),
+                "score_component": source_type_component,
+            }
+        )
+
+    if best_trend_entity and best_trend_score > 0:
+        trend_component = round(weights["entity_trend"] * max(best_trend_score, 0.0), 2)
+        score += trend_component
+        reasons.append(
+            f"entity_trend={best_trend_entity['entity_name']}:{best_trend_score:+.3f}"
+        )
+        signal_details.append(
+            {
+                "signal": "entity_trend",
+                "value": {
+                    "entity": best_trend_entity["entity_name"],
+                    "trend_label": best_trend_entity["trend_label"],
+                    "trend_score": best_trend_score,
+                },
+                "threshold": ">0",
+                "weight": weights["entity_trend"],
+                "score_component": trend_component,
+            }
+        )
+
+    promotion_score = round(score, 2)
+    promotion_confidence = max(
+        0,
+        min(
+            100,
+            int(
+                round(
+                    (promotion_score / max(DEFAULT_PROMOTION_SCORE_THRESHOLD, 1)) * 55
+                    + signal_count * 8
+                    + (5 if watchlist_hits else 0)
+                )
+            ),
+        ),
+    )
+
+    reason_fields = {
+        "signal_count": signal_count,
+        "promotion_score": promotion_score,
+        "promotion_threshold": signal_threshold,
+        "minimum_signal_count": DEFAULT_MIN_SIGNAL_COUNT,
+        "signal_details": signal_details,
+        "entity_evidence": entity_evidence,
+        "input_excerpt": truncate_excerpt(item_text),
+    }
+
+    return {
+        "promotion_score": promotion_score,
+        "promotion_confidence": promotion_confidence,
+        "signal_count": signal_count,
+        "promotion_reasons": reasons,
+        "promotion_reason_fields": reason_fields,
+        "best_entity": best_entity,
+    }
+
+
+def truncate_excerpt(value, limit=240):
+    text = normalize_whitespace(value)
+
+    if len(text) <= limit:
+        return text
+
+    if limit <= 1:
+        return text[:limit]
+
+    return text[: limit - 1].rstrip() + "…"
 
 
 def build_event_record(
@@ -199,6 +603,8 @@ def build_event_record(
     input_log_path,
     importance_threshold,
     include_slack_payloads,
+    entity_contexts,
+    weights,
 ):
     promotion_hash = get_promotion_hash(item)
     dedupe_hash = get_dedupe_hash(item)
@@ -207,10 +613,15 @@ def build_event_record(
     verticals = normalize_list(item.get("verticals"))
     tags = unique_tags(item)
     summary, preview = build_summary_and_preview(item)
-    reasons = get_reasons(item, importance_threshold)
+    evidence = build_promotion_evidence(
+        item,
+        entity_contexts,
+        weights,
+        importance_threshold,
+    )
 
     event_record = {
-        "schema_version": 1,
+        "schema_version": 2,
         "event_type": "promote_to_hermes",
         "event_id": promotion_hash,
         "promotion_hash": promotion_hash,
@@ -232,7 +643,10 @@ def build_event_record(
         "watchlist_hits": item.get("watchlist_hits", []),
         "summary": summary,
         "preview": preview,
-        "promotion_reasons": reasons,
+        "promotion_reasons": evidence["promotion_reasons"],
+        "promotion_reason_fields": evidence["promotion_reason_fields"],
+        "promotion_score": evidence["promotion_score"],
+        "promotion_confidence": evidence["promotion_confidence"],
         "target_system": "hermes",
     }
 
@@ -241,6 +655,7 @@ def build_event_record(
             event_record["source_name"],
             signal_band,
             importance_score,
+            evidence["promotion_confidence"],
             summary,
         )
 
@@ -262,7 +677,10 @@ def build_event_record(
         "watchlist_hits": item.get("watchlist_hits", []),
         "summary": summary,
         "preview": preview,
-        "promotion_reasons": reasons,
+        "promotion_reasons": evidence["promotion_reasons"],
+        "promotion_reason_fields": evidence["promotion_reason_fields"],
+        "promotion_score": evidence["promotion_score"],
+        "promotion_confidence": evidence["promotion_confidence"],
         "source_item_id": event_record["source_item_id"],
         "source_timestamp": safe_text(item.get("timestamp") or item.get("created_at")),
         "origin": "aeon",
@@ -312,6 +730,9 @@ def promote_items(
     hermes_dir=DEFAULT_HERMES_DIR,
     run_date=None,
     importance_threshold=DEFAULT_IMPORTANCE_THRESHOLD,
+    promotion_score_threshold=DEFAULT_PROMOTION_SCORE_THRESHOLD,
+    min_signal_count=DEFAULT_MIN_SIGNAL_COUNT,
+    weights=None,
     dry_run=False,
     include_slack_payloads=False,
 ):
@@ -319,6 +740,7 @@ def promote_items(
     event_dir = Path(event_dir)
     hermes_dir = Path(hermes_dir)
     run_date = run_date or datetime.now(UTC).date().isoformat()
+    weights = weights or DEFAULT_WEIGHTS
 
     items = load_jsonl(input_log_path)
 
@@ -331,19 +753,52 @@ def promote_items(
             "event_path": event_dir / f"{run_date}.jsonl",
             "hermes_path": hermes_dir / f"{run_date}.jsonl",
             "planned": [],
+            "suppressed_count": 0,
+            "metrics": {
+                "promotion_score_threshold": promotion_score_threshold,
+                "min_signal_count": min_signal_count,
+            },
         }
 
     existing_event_hashes = load_existing_hashes(event_dir)
     existing_hermes_hashes = load_existing_hashes(hermes_dir)
+    entity_contexts = build_entity_context(items)
 
     planned = []
     event_records = []
     hermes_records = []
+    suppressed_count = 0
+    seen_narrative_signatures = set()
 
-    for item in items:
-        reasons = get_reasons(item, importance_threshold)
+    for index, item in enumerate(items):
+        item_text = build_item_text(item)
+        narrative_signature = build_narrative_signature(item)
+        suppression_reason = ""
 
-        if not reasons:
+        if narrative_signature in seen_narrative_signatures:
+            suppression_reason = "duplicate_narrative"
+        elif is_low_information_tweet(item, item_text):
+            suppression_reason = "low_information_tweet"
+        elif is_generic_market_commentary(item, item_text):
+            suppression_reason = "generic_market_commentary"
+
+        if suppression_reason:
+            suppressed_count += 1
+            continue
+
+        seen_narrative_signatures.add(narrative_signature)
+        evidence = build_promotion_evidence(
+            item,
+            entity_contexts[index],
+            weights,
+            importance_threshold,
+        )
+
+        if (
+            evidence["signal_count"] < min_signal_count
+            or evidence["promotion_score"] < get_effective_threshold(item, promotion_score_threshold)
+        ):
+            suppressed_count += 1
             continue
 
         promotion_hash = get_promotion_hash(item)
@@ -357,7 +812,20 @@ def promote_items(
             input_log_path,
             importance_threshold,
             include_slack_payloads,
+            entity_contexts[index],
+            weights,
         )
+
+        built["event_record"]["promotion_reason_fields"]["promotion_threshold"] = get_effective_threshold(
+            item,
+            promotion_score_threshold,
+        )
+        built["event_record"]["promotion_reason_fields"]["minimum_signal_count"] = min_signal_count
+        built["hermes_record"]["promotion_reason_fields"]["promotion_threshold"] = get_effective_threshold(
+            item,
+            promotion_score_threshold,
+        )
+        built["hermes_record"]["promotion_reason_fields"]["minimum_signal_count"] = min_signal_count
 
         planned.append(built)
 
@@ -384,6 +852,11 @@ def promote_items(
         "event_path": event_path,
         "hermes_path": hermes_path,
         "planned": planned,
+        "suppressed_count": suppressed_count,
+        "metrics": {
+            "promotion_score_threshold": promotion_score_threshold,
+            "min_signal_count": min_signal_count,
+        },
     }
 
 
@@ -415,7 +888,19 @@ def main():
         "--importance-threshold",
         default=DEFAULT_IMPORTANCE_THRESHOLD,
         type=int,
-        help="Promote when importance_score is greater than this threshold.",
+        help="Floor used to decide whether importance contributes a promotion signal.",
+    )
+    parser.add_argument(
+        "--promotion-score-threshold",
+        default=DEFAULT_PROMOTION_SCORE_THRESHOLD,
+        type=float,
+        help="Minimum weighted score required for Hermes promotion.",
+    )
+    parser.add_argument(
+        "--min-signal-count",
+        default=DEFAULT_MIN_SIGNAL_COUNT,
+        type=int,
+        help="Minimum number of independent signals required for Hermes promotion.",
     )
     parser.add_argument(
         "--dry-run",
@@ -436,6 +921,8 @@ def main():
         hermes_dir=Path(args.hermes_dir),
         run_date=args.date or None,
         importance_threshold=args.importance_threshold,
+        promotion_score_threshold=args.promotion_score_threshold,
+        min_signal_count=args.min_signal_count,
         dry_run=args.dry_run,
         include_slack_payloads=args.include_slack_payloads,
     )

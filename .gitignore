@@ -75,3 +75,9 @@ data/outbox/
 data/metadata/email_sources.jsondata/metadata/email_sources.json
 data/metadata/email_sources.json
 data/metadata/source_health.jsonl
+
+data/metadata/email_sources.json
+data/metadata/source_health.jsonl
+data/events/
+data/hermes/
+data/outbox/

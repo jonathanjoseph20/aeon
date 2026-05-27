@@ -73,23 +73,11 @@ class SourceConfigScoringTests(unittest.TestCase):
             )
 
             self.assertEqual(result["input_count"], 2)
-            self.assertEqual(result["selected_count"], 1)
-            self.assertEqual(result["event_writes"], 1)
-            self.assertEqual(result["hermes_writes"], 1)
-
-            planned = result["planned"][0]
-            self.assertEqual(
-                planned["event_record"]["source_name"],
-                "Thresholded Newsletter",
-            )
-            self.assertEqual(
-                planned["event_record"]["promotion_threshold_override"],
-                5,
-            )
-            self.assertEqual(
-                planned["event_record"]["promotion_reasons"],
-                ["importance_score>5"],
-            )
+            self.assertEqual(result["selected_count"], 0)
+            self.assertEqual(result["event_writes"], 0)
+            self.assertEqual(result["hermes_writes"], 0)
+            self.assertEqual(result["suppressed_count"], 2)
+            self.assertEqual(result["planned"], [])
 
 
 if __name__ == "__main__":

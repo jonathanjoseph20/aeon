@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 DEFAULT_DIGEST_PATH = Path("data/processed/daily_digest.md")
+DEFAULT_INPUT_LOG = Path("data/processed/intake_log.jsonl")
 DEFAULT_ALERTS_PATH = Path("data/processed/alert_candidates.jsonl")
 DEFAULT_HERMES_DIR = Path("data/hermes/promoted")
 DEFAULT_OUTBOX_DIR = Path("data/outbox/slack/daily-intel-digest")
@@ -61,6 +62,13 @@ def load_jsonl_records(path):
 
 def count_jsonl_records(path):
     return len(load_jsonl_records(path))
+
+
+def pluralize(count, singular, plural=None):
+    if count == 1:
+        return singular
+
+    return plural or f"{singular}s"
 
 
 def parse_digest_bullet(line):
@@ -238,8 +246,10 @@ def summarize_vertical_group(group):
 def build_text_payload(payload):
     parts = [
         f"{payload['title']} ({payload['date']})",
-        f"{payload['top_alerts_count']} alert(s)",
-        f"{payload['promoted_to_hermes_count']} Hermes promotions",
+        f"{payload['total_intake_items']} {pluralize(payload['total_intake_items'], 'intake item')}",
+        f"{payload['top_alerts_count']} {pluralize(payload['top_alerts_count'], 'alert')}",
+        f"{payload['promoted_to_hermes_count']} {pluralize(payload['promoted_to_hermes_count'], 'Hermes promotion')}",
+        f"promotion rate {payload['promotion_rate_percent']}%",
     ]
 
     vertical_parts = []
@@ -292,12 +302,14 @@ def summarize_entity_group(group):
 
 def build_slack_digest_payload(
     digest_path=DEFAULT_DIGEST_PATH,
+    input_log_path=DEFAULT_INPUT_LOG,
     alerts_path=DEFAULT_ALERTS_PATH,
     hermes_dir=DEFAULT_HERMES_DIR,
     outbox_dir=DEFAULT_OUTBOX_DIR,
     run_date="",
 ):
     digest_path = Path(digest_path)
+    input_log_path = Path(input_log_path)
     alerts_path = Path(alerts_path)
     hermes_dir = Path(hermes_dir)
     outbox_dir = Path(outbox_dir)
@@ -318,12 +330,20 @@ def build_slack_digest_payload(
     payload = {
         "title": clean_text(digest["title"]),
         "date": digest_date,
+        "total_intake_items": count_jsonl_records(input_log_path),
         "top_alerts_count": count_jsonl_records(alerts_path),
         "promoted_to_hermes_count": count_jsonl_records(hermes_path),
         "grouped_vertical_summaries": grouped_vertical_summaries,
         "entity_section_summaries": entity_section_summaries,
         "full_digest_path": str(digest_path) if digest_path.exists() else None,
     }
+    total_intake_items = payload["total_intake_items"]
+    promoted_to_hermes_count = payload["promoted_to_hermes_count"]
+    promotion_rate = (
+        promoted_to_hermes_count / total_intake_items if total_intake_items else 0.0
+    )
+    payload["promotion_rate"] = round(promotion_rate, 4)
+    payload["promotion_rate_percent"] = round(promotion_rate * 100, 1)
     payload["text"] = build_text_payload(payload)
 
     output_path = outbox_dir / f"{digest_date}.json"
@@ -351,6 +371,11 @@ def main(argv=None):
         "--digest-path",
         default=str(DEFAULT_DIGEST_PATH),
         help="Path to the generated Markdown digest artifact.",
+    )
+    parser.add_argument(
+        "--input-log",
+        default=str(DEFAULT_INPUT_LOG),
+        help="Path to the processed intake log used to compute intake metrics.",
     )
     parser.add_argument(
         "--alerts-path",
@@ -384,6 +409,7 @@ def main(argv=None):
 
     result = build_slack_digest_payload(
         digest_path=Path(args.digest_path),
+        input_log_path=Path(args.input_log),
         alerts_path=Path(args.alerts_path),
         hermes_dir=Path(args.hermes_dir),
         outbox_dir=Path(args.outbox_dir),

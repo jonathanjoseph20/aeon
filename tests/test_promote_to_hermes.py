@@ -39,7 +39,7 @@ class PromoteToHermesTests(unittest.TestCase):
     def setUp(self):
         self.fixture_log = FIXTURES_DIR / "promote_to_hermes_intake_log.jsonl"
 
-    def test_promotes_expected_items_and_materializes_append_only_outputs(self):
+    def test_promotes_only_the_highest_conviction_item_and_materializes_append_only_outputs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)
             events_dir = temp_dir / "events"
@@ -55,15 +55,16 @@ class PromoteToHermesTests(unittest.TestCase):
             )
 
             self.assertEqual(result["input_count"], 5)
-            self.assertEqual(result["selected_count"], 3)
-            self.assertEqual(result["event_writes"], 3)
-            self.assertEqual(result["hermes_writes"], 3)
+            self.assertEqual(result["selected_count"], 1)
+            self.assertEqual(result["event_writes"], 1)
+            self.assertEqual(result["hermes_writes"], 1)
+            self.assertGreaterEqual(result["suppressed_count"], 3)
 
             event_records = read_jsonl(events_dir / "2026-05-25.jsonl")
             hermes_records = read_jsonl(hermes_dir / "2026-05-25.jsonl")
 
-            self.assertEqual(len(event_records), 3)
-            self.assertEqual(len(hermes_records), 3)
+            self.assertEqual(len(event_records), 1)
+            self.assertEqual(len(hermes_records), 1)
 
             first_event = event_records[0]
             self.assertEqual(first_event["event_type"], "promote_to_hermes")
@@ -77,24 +78,18 @@ class PromoteToHermesTests(unittest.TestCase):
             self.assertEqual(first_event["summary"], "Alpha summary for Hermes")
             self.assertEqual(first_event["preview"], "Alpha preview for Hermes")
             self.assertIn("slack_notification", first_event)
-
-            beta_event = next(
-                record for record in event_records if record["source_name"] == "Beta Watch"
+            self.assertGreaterEqual(first_event["promotion_reason_fields"]["signal_count"], 2)
+            self.assertGreaterEqual(first_event["promotion_confidence"], 80)
+            self.assertTrue(
+                any(reason.startswith("importance_score>=") for reason in first_event["promotion_reasons"])
             )
-            self.assertEqual(beta_event["promotion_reasons"], ["watchlist_hit"])
-            self.assertEqual(beta_event["summary"], "Beta preview for Hermes")
-            self.assertEqual(beta_event["preview"], "Beta preview for Hermes")
-
-            gamma_record = next(
-                record for record in hermes_records if record["source_name"] == "Gamma Signal"
+            self.assertIn("source_priority=high", first_event["promotion_reasons"])
+            self.assertTrue(
+                any(reason.startswith("cross_source_entity=") for reason in first_event["promotion_reasons"])
             )
-            self.assertEqual(gamma_record["signal_band"], "High Signal")
-            self.assertEqual(gamma_record["tags"], ["portfolio"])
-            self.assertEqual(gamma_record["summary"], "Gamma summary for Hermes")
-            self.assertEqual(gamma_record["preview"], "Gamma preview for Hermes")
 
             promoted_hashes = {record["promotion_hash"] for record in event_records}
-            self.assertEqual(len(promoted_hashes), 3)
+            self.assertEqual(len(promoted_hashes), 1)
 
     def test_second_run_is_replay_safe(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -116,7 +111,7 @@ class PromoteToHermesTests(unittest.TestCase):
                 run_date="2026-05-25",
             )
 
-            self.assertEqual(first["selected_count"], 3)
+            self.assertEqual(first["selected_count"], 1)
             self.assertEqual(second["selected_count"], 0)
             self.assertEqual(second["event_writes"], 0)
             self.assertEqual(second["hermes_writes"], 0)
@@ -124,8 +119,8 @@ class PromoteToHermesTests(unittest.TestCase):
             event_records = read_jsonl(events_dir / "2026-05-25.jsonl")
             hermes_records = read_jsonl(hermes_dir / "2026-05-25.jsonl")
 
-            self.assertEqual(len(event_records), 3)
-            self.assertEqual(len(hermes_records), 3)
+            self.assertEqual(len(event_records), 1)
+            self.assertEqual(len(hermes_records), 1)
 
     def test_dry_run_does_not_write_outputs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -141,9 +136,9 @@ class PromoteToHermesTests(unittest.TestCase):
                 dry_run=True,
             )
 
-            self.assertEqual(result["selected_count"], 3)
-            self.assertEqual(result["event_writes"], 3)
-            self.assertEqual(result["hermes_writes"], 3)
+            self.assertEqual(result["selected_count"], 1)
+            self.assertEqual(result["event_writes"], 1)
+            self.assertEqual(result["hermes_writes"], 1)
             self.assertFalse((events_dir / "2026-05-25.jsonl").exists())
             self.assertFalse((hermes_dir / "2026-05-25.jsonl").exists())
 
