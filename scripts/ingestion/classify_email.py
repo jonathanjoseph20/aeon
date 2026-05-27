@@ -17,6 +17,7 @@ from source_config import (
     merge_priority,
     merge_verticals,
     normalize_source_type,
+    normalize_twitter_handle,
     priority_score_boost,
 )
 from utils.clean_text import clean_email_text
@@ -102,11 +103,7 @@ def load_twitter_registry():
         if source_type != "twitter" and not entry.get("feed_url") and not entry.get("feed_urls"):
             continue
 
-        handle = normalize_handle(
-            entry.get("handle")
-            or entry.get("twitter_handle")
-            or entry.get("source_handle")
-        )
+        handle = normalize_twitter_handle(entry)
 
         if not handle:
             continue

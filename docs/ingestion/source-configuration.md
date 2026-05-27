@@ -9,7 +9,7 @@ It lets you tune source priority, default verticals, watchlist boosts, Hermes pr
 - `source_type`: One of `newsletter`, `pdf`, or `twitter`.
 - `priority`: `low`, `medium`, or `high`. Higher-priority sources get a scoring boost during classification.
 - `default_verticals`: Vertical priors that AEON should attach to items from this source.
-- `feed_url`: Optional RSS or Atom URL for Twitter feed ingestion. If omitted on a Twitter source, AEON builds an RSSHub URL from the handle.
+- `feed_url`: Optional RSS or Atom URL for Twitter feed ingestion. Plain `x.com` or `twitter.com` profile URLs are accepted as convenience input and normalized to RSSHub. If a Twitter source omits `feed_url`, AEON builds an RSSHub URL from the handle.
 - `twitter_handle`: Optional explicit Twitter handle field. AEON treats this the same as `handle`.
 - `watchlist_boost`: Extra score to add when the item matches a watchlist entity.
 - `promotion_threshold_override`: Per-source Hermes promotion threshold.
@@ -76,7 +76,7 @@ AEON will resolve that source to:
 https://rsshub.app/twitter/user/aaronjmars
 ```
 
-If you need a different proxy, a self-hosted RSSHub instance, or a non-RSSHub feed, set `feed_url` explicitly and AEON will preserve it.
+If you need a different proxy, a self-hosted RSSHub instance, or a non-RSSHub feed, set `feed_url` explicitly and AEON will preserve it. Plain `x.com` and `twitter.com` profile URLs are not preserved; they are converted to RSSHub URLs during normalization.
 
 Then run the feed fetcher:
 

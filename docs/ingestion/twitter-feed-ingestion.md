@@ -8,8 +8,9 @@ This keeps ingestion deterministic-first and avoids adding any LLM dependency.
 1. Open `config/sources.yml`.
 2. Add or update a `source_type: twitter` entry with `source_name` and `handle` or `twitter_handle`.
 3. If you omit `feed_url`, AEON generates `https://rsshub.app/twitter/user/<handle>` automatically.
-4. If you want a different proxy or a self-hosted RSSHub instance, set `feed_url` explicitly and AEON will preserve it.
-5. Set `priority`, `default_verticals`, `watchlist_boost`, and `promotion_threshold_override` as needed.
+4. Plain `x.com` and `twitter.com` profile URLs are accepted as convenience input and normalized to RSSHub.
+5. If you want a different proxy or a self-hosted RSSHub instance, set `feed_url` explicitly and AEON will preserve it.
+6. Set `priority`, `default_verticals`, `watchlist_boost`, and `promotion_threshold_override` as needed.
 
 Example:
 
@@ -26,7 +27,7 @@ sources:
     alert_enabled: true
 ```
 
-AEON resolves the feed to `https://rsshub.app/twitter/user/aaronjmars` unless you provide an explicit `feed_url`.
+AEON resolves the feed to `https://rsshub.app/twitter/user/aaronjmars` unless you provide an explicit non-X `feed_url`.
 
 ## Run It
 

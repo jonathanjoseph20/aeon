@@ -17,6 +17,7 @@ from source_config import (
     load_source_entries,
     normalize_feed_urls,
     normalize_handle,
+    normalize_twitter_handle,
     normalize_source_type,
 )
 
@@ -60,12 +61,7 @@ def load_twitter_sources(sources_path=Path("config/sources.yml")):
         if source_type != "twitter" and not normalize_feed_urls(entry):
             continue
 
-        handle = normalize_handle(
-            entry.get("handle")
-            or entry.get("source_handle")
-            or entry.get("source_name")
-            or entry.get("feed_url")
-        )
+        handle = normalize_twitter_handle(entry)
 
         if not handle:
             continue

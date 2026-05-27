@@ -86,13 +86,22 @@ class FetchTwitterFixtureTests(unittest.TestCase):
                 "\n".join(
                     [
                         "twitter:",
-                        "  - source_name: Zero X NGMI",
+                        "  - source_name: X Profile",
                         "    source_type: twitter",
-                        "    twitter_handle: 0xngmi",
+                        "    feed_url: https://x.com/0xngmi",
+                        "  - source_name: Twitter Profile",
+                        "    source_type: twitter",
+                        "    feed_url: https://twitter.com/twngmi/",
                         "  - source_name: Custom Feed Override",
                         "    source_type: twitter",
-                        "    twitter_handle: customfeed",
+                        "    handle: customfeed",
                         "    feed_url: https://example.invalid/custom.xml",
+                        "  - source_name: Twitter Handle Wins",
+                        "    source_type: twitter",
+                        "    twitter_handle: winner",
+                        "    feed_url: https://x.com/notwinner",
+                        "  - source_name: sourceonly",
+                        "    source_type: twitter",
                         "",
                     ]
                 ),
@@ -110,8 +119,47 @@ class FetchTwitterFixtureTests(unittest.TestCase):
                 ["https://rsshub.app/twitter/user/0xngmi"],
             )
             self.assertEqual(
+                registry["twngmi"]["feed_urls"],
+                ["https://rsshub.app/twitter/user/twngmi"],
+            )
+            self.assertEqual(
                 registry["customfeed"]["feed_urls"],
                 ["https://example.invalid/custom.xml"],
+            )
+            self.assertEqual(
+                registry["winner"]["feed_urls"],
+                ["https://rsshub.app/twitter/user/winner"],
+            )
+            self.assertEqual(
+                registry["sourceonly"]["feed_urls"],
+                ["https://rsshub.app/twitter/user/sourceonly"],
+            )
+
+    def test_source_name_only_twitter_source_generates_rsshub_feed_url(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir = Path(temp_dir)
+            sources_path = temp_dir / "sources.yml"
+            sources_path.write_text(
+                "\n".join(
+                    [
+                        "twitter:",
+                        "  - source_name: 0xngmi",
+                        "    source_type: twitter",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            registry = fetch_twitter.load_twitter_sources(sources_path)
+
+            self.assertEqual(
+                registry["0xngmi"]["source_name"],
+                "0xngmi",
+            )
+            self.assertEqual(
+                registry["0xngmi"]["feed_urls"],
+                ["https://rsshub.app/twitter/user/0xngmi"],
             )
 
     def test_manual_jsonl_ingestion_writes_normalized_twitter_records(self):

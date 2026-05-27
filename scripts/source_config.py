@@ -1,4 +1,6 @@
 from pathlib import Path
+import re
+from urllib.parse import urlparse
 
 import yaml
 
@@ -28,6 +30,15 @@ def normalize_handle(value):
     return normalize_text(value).lstrip("@").lower()
 
 
+def looks_like_twitter_handle(value):
+    handle = normalize_handle(value)
+
+    if not handle:
+        return False
+
+    return bool(re.fullmatch(r"[a-z0-9_]{1,15}", handle))
+
+
 def build_twitter_feed_url(handle, rsshub_base="https://rsshub.app"):
     normalized_handle = normalize_handle(handle)
 
@@ -35,6 +46,61 @@ def build_twitter_feed_url(handle, rsshub_base="https://rsshub.app"):
         return ""
 
     return f"{normalize_text(rsshub_base).rstrip('/')}/twitter/user/{normalized_handle}"
+
+
+def extract_twitter_handle_from_url(value):
+    raw_value = normalize_text(value)
+
+    if not raw_value:
+        return ""
+
+    parsed = urlparse(raw_value)
+
+    if parsed.scheme not in {"http", "https"}:
+        return ""
+
+    host = parsed.netloc.lower()
+
+    if host.startswith("www."):
+        host = host[4:]
+
+    if host not in {"x.com", "twitter.com"}:
+        return ""
+
+    path_parts = [part for part in parsed.path.split("/") if part]
+
+    if len(path_parts) != 1:
+        return ""
+
+    handle = normalize_handle(path_parts[0])
+
+    if not handle or handle in {"home", "intent", "search", "explore", "i"}:
+        return ""
+
+    return handle
+
+
+def normalize_twitter_handle(entry):
+    explicit_handle = normalize_handle(
+        entry.get("twitter_handle")
+        or entry.get("handle")
+        or entry.get("source_handle")
+    )
+
+    if explicit_handle:
+        return explicit_handle
+
+    source_name_handle = normalize_handle(entry.get("source_name"))
+
+    if looks_like_twitter_handle(source_name_handle):
+        return source_name_handle
+
+    handle_from_profile_url = extract_twitter_handle_from_url(entry.get("feed_url"))
+
+    if handle_from_profile_url:
+        return handle_from_profile_url
+
+    return ""
 
 
 def normalize_int(value, default=0):
@@ -84,15 +150,27 @@ def normalize_feed_urls(entry):
     if isinstance(feed_urls, str):
         feed_urls = [feed_urls]
 
-    normalized_feed_urls = [normalize_text(url) for url in feed_urls if normalize_text(url)]
+    normalized_feed_urls = []
+
+    for url in feed_urls:
+        normalized_url = normalize_text(url)
+
+        if not normalized_url:
+            continue
+
+        profile_handle = extract_twitter_handle_from_url(normalized_url)
+
+        if normalize_source_type(entry.get("source_type")) == "twitter" and profile_handle:
+            preferred_handle = normalize_twitter_handle(entry) or profile_handle
+            normalized_url = build_twitter_feed_url(preferred_handle)
+
+        normalized_feed_urls.append(normalized_url)
 
     if normalized_feed_urls:
         return normalized_feed_urls
 
     if normalize_source_type(entry.get("source_type")) == "twitter":
-        generated_url = build_twitter_feed_url(
-            entry.get("twitter_handle") or entry.get("handle") or entry.get("source_handle")
-        )
+        generated_url = build_twitter_feed_url(normalize_twitter_handle(entry))
 
         if generated_url:
             return [generated_url]
@@ -115,9 +193,8 @@ def normalize_source_type(value, fallback=""):
 def normalize_source_entry(entry, source_type_hint=""):
     source_type = normalize_source_type(entry.get("source_type"), source_type_hint)
     feed_urls = normalize_feed_urls(entry)
-    handle = normalize_handle(
+    handle = normalize_twitter_handle(entry) if source_type == "twitter" else normalize_handle(
         entry.get("handle")
-        or entry.get("twitter_handle")
         or entry.get("source_handle")
     )
     source_name = (
