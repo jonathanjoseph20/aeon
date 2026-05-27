@@ -81,3 +81,5 @@ data/metadata/source_health.jsonl
 data/events/
 data/hermes/
 data/outbox/
+
+data/processed/narrative_summary.json
