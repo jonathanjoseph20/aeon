@@ -1,0 +1,145 @@
+import importlib.util
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MODULE_PATH = REPO_ROOT / "scripts" / "ingestion" / "build_entity_summary.py"
+
+
+def load_build_entity_summary_module():
+    spec = importlib.util.spec_from_file_location(
+        "build_entity_summary",
+        MODULE_PATH,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+build_entity_summary = load_build_entity_summary_module()
+
+
+def write_jsonl(path, records):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(json.dumps(record) for record in records) + "\n",
+        encoding="utf-8",
+    )
+
+
+class BuildEntitySummaryTests(unittest.TestCase):
+    def test_builds_cross_source_entity_summary_and_entity_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir = Path(temp_dir)
+            log_path = temp_dir / "intake_log.jsonl"
+            entity_summary_path = temp_dir / "entity_summary.json"
+            entities_dir = temp_dir / "entities"
+
+            write_jsonl(
+                log_path,
+                [
+                    {
+                        "item_id": "openai-1",
+                        "source_type": "twitter",
+                        "source_name": "alpha feed",
+                        "subject": "openai expands partnerships",
+                        "content_preview": "OpenAI announced a model update for enterprise teams.",
+                        "importance_score": 2,
+                        "timestamp": "2026-05-20T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "openai-2",
+                        "source_type": "newsletter",
+                        "source_name": "beta note",
+                        "subject": "openai watch",
+                        "content_preview": "OpenAI and Microsoft were discussed in the latest briefing.",
+                        "importance_score": 3,
+                        "timestamp": "2026-05-21T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "microsoft-1",
+                        "source_type": "pdf",
+                        "source_name": "gamma memo",
+                        "subject": "market report",
+                        "content_preview": "Microsoft added a cloud product update and OpenAI was cited again.",
+                        "importance_score": 7,
+                        "timestamp": "2026-05-24T10:00:00Z",
+                        "verticals": ["Cloud"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "openai-3",
+                        "source_type": "twitter",
+                        "source_name": "delta feed",
+                        "subject": "openai momentum",
+                        "content_preview": "OpenAI kept gaining attention across the week.",
+                        "importance_score": 8,
+                        "timestamp": "2026-05-25T10:00:00Z",
+                        "verticals": ["AI"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "microsoft-2",
+                        "source_type": "newsletter",
+                        "source_name": "epsilon note",
+                        "subject": "microsoft update",
+                        "content_preview": "Microsoft received another mention in a separate newsletter.",
+                        "importance_score": 5,
+                        "timestamp": "2026-05-25T12:00:00Z",
+                        "verticals": ["Cloud"],
+                        "digest_enabled": True,
+                    },
+                    {
+                        "item_id": "microsoft-3",
+                        "source_type": "pdf",
+                        "source_name": "zeta memo",
+                        "subject": "microsoft report",
+                        "content_preview": "Microsoft appeared in the quarterly PDF report.",
+                        "importance_score": 6,
+                        "timestamp": "2026-05-25T13:00:00Z",
+                        "verticals": ["Cloud"],
+                        "digest_enabled": True,
+                    },
+                ],
+            )
+
+            summary = build_entity_summary.build_entity_summary(
+                log_path=log_path,
+                output_path=entity_summary_path,
+                entity_dir=entities_dir,
+            )
+
+            self.assertTrue(entity_summary_path.exists())
+            self.assertGreaterEqual(summary["entity_count"], 2)
+            self.assertTrue(entities_dir.exists())
+            self.assertGreaterEqual(len(list(entities_dir.glob("*.json"))), 2)
+
+            top_emerging = summary["top_emerging_entities"][0]
+            self.assertEqual(top_emerging["entity_name"], "OpenAI")
+            self.assertEqual(top_emerging["mention_count"], 4)
+            self.assertEqual(top_emerging["source_diversity"], 4)
+            self.assertEqual(top_emerging["source_type_diversity"], 3)
+            self.assertEqual(top_emerging["trend_label"], "rising")
+            self.assertEqual(top_emerging["latest_mention_timestamp"], "2026-05-25T10:00:00+00:00")
+            self.assertEqual(top_emerging["associated_verticals"], ["AI", "Cloud"])
+
+            cross_source = summary["cross_source_entities"][0]
+            self.assertEqual(cross_source["entity_name"], "OpenAI")
+            self.assertGreaterEqual(cross_source["source_type_diversity"], 2)
+
+            most_mentioned = summary["most_mentioned_entities"][0]
+            self.assertEqual(most_mentioned["entity_name"], "OpenAI")
+            self.assertEqual(most_mentioned["mention_count"], 4)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -129,6 +129,68 @@ class BuildSlackDigestPayloadTests(unittest.TestCase):
             self.assertEqual(printed_payload["top_alerts_count"], 2)
             self.assertEqual(printed_payload["promoted_to_hermes_count"], 3)
 
+    def test_includes_entity_sections_in_payload_text(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir = Path(temp_dir)
+            digest_path = temp_dir / "daily_digest.md"
+            digest_path.write_text(
+                "\n".join(
+                    [
+                        "# Daily Intelligence Digest",
+                        "",
+                        "Generated: 2026-05-25T23:32:21Z",
+                        "",
+                        "## Topic Clusters",
+                        "",
+                        "- **3 related items** — keywords: alpha, beta, gamma",
+                        "",
+                        "## Macro",
+                        "",
+                        "- `macro-001` — **Macro Desk** — CPI week ahead — *High Signal / high / score 9* — tags: Macro — Rate markets are watching the next CPI print and Fed path.",
+                        "",
+                        "## Top Emerging Entities",
+                        "",
+                        "- **OpenAI** — trend: rising — mentions: 4 — sources: 3 — avg importance: 5.5 — latest: 2026-05-25T10:00:00Z — verticals: AI, Cloud",
+                        "- **Microsoft** — trend: stable — mentions: 3 — sources: 2 — avg importance: 6.0 — latest: 2026-05-25T13:00:00Z — verticals: Cloud",
+                        "",
+                        "## Most-mentioned Entities",
+                        "",
+                        "- **OpenAI** — trend: rising — mentions: 4 — sources: 3 — avg importance: 5.5 — latest: 2026-05-25T10:00:00Z — verticals: AI, Cloud",
+                        "",
+                        "## Cross-source Entities",
+                        "",
+                        "- **OpenAI** — trend: rising — mentions: 4 — sources: 3 — avg importance: 5.5 — latest: 2026-05-25T10:00:00Z — verticals: AI, Cloud",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            alerts_path = temp_dir / "alert_candidates.jsonl"
+            alerts_path.write_text(self.alerts_fixture.read_text(encoding="utf-8"), encoding="utf-8")
+
+            hermes_dir = temp_dir / "hermes" / "promoted"
+            hermes_dir.mkdir(parents=True, exist_ok=True)
+            hermes_path = hermes_dir / "2026-05-25.jsonl"
+            hermes_path.write_text(self.hermes_fixture.read_text(encoding="utf-8"), encoding="utf-8")
+
+            result = build_slack_digest_payload.build_slack_digest_payload(
+                digest_path=digest_path,
+                alerts_path=alerts_path,
+                hermes_dir=hermes_dir,
+                outbox_dir=temp_dir / "outbox" / "slack" / "daily-intel-digest",
+            )
+
+            payload = result["payload"]
+
+            self.assertEqual(len(payload["entity_section_summaries"]), 3)
+            self.assertEqual(payload["entity_section_summaries"][0]["section"], "Top Emerging Entities")
+            self.assertEqual(payload["entity_section_summaries"][0]["item_count"], 2)
+            self.assertIn(
+                "Top Emerging Entities: OpenAI (rising, 4 mentions, 3 sources)",
+                payload["text"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

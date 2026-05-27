@@ -13,6 +13,11 @@ DEFAULT_OUTBOX_DIR = Path("data/outbox/slack/daily-intel-digest")
 HEADER_PREFIX = "# "
 SECTION_PREFIX = "## "
 GENERATED_PREFIX = "Generated:"
+ENTITY_SECTION_TITLES = {
+    "Top Emerging Entities",
+    "Most-mentioned Entities",
+    "Cross-source Entities",
+}
 
 
 def clean_text(value):
@@ -84,6 +89,34 @@ def parse_digest_bullet(line):
     }
 
 
+def parse_entity_bullet(line):
+    if not line.startswith("- **"):
+        return None
+
+    parts = line[2:].split(" — ")
+
+    if len(parts) < 6:
+        return None
+
+    entity = parts[0].strip("*")
+    trend = parts[1].removeprefix("trend:").strip()
+    mentions = parts[2].removeprefix("mentions:").strip()
+    sources = parts[3].removeprefix("sources:").strip()
+    avg_importance = parts[4].removeprefix("avg importance:").strip()
+    latest = parts[5].removeprefix("latest:").strip()
+    verticals = parts[6].removeprefix("verticals:").strip() if len(parts) > 6 else ""
+
+    return {
+        "entity": clean_text(entity),
+        "trend": clean_text(trend),
+        "mentions": clean_text(mentions),
+        "sources": clean_text(sources),
+        "avg_importance": clean_text(avg_importance),
+        "latest": clean_text(latest),
+        "verticals": clean_text(verticals),
+    }
+
+
 def parse_digest(digest_path):
     digest_path = Path(digest_path)
 
@@ -92,12 +125,15 @@ def parse_digest(digest_path):
             "title": "Daily Intelligence Digest",
             "generated_at": "",
             "vertical_groups": [],
+            "entity_sections": [],
         }
 
     title = "Daily Intelligence Digest"
     generated_at = ""
     vertical_groups = []
+    entity_sections = []
     current_group = None
+    current_section_type = ""
 
     for raw_line in digest_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
@@ -118,14 +154,28 @@ def parse_digest(digest_path):
 
             if section_title.lower() == "topic clusters":
                 current_group = None
+                current_section_type = ""
+                continue
+
+            if section_title in ENTITY_SECTION_TITLES:
+                current_group = {"section": section_title, "items": []}
+                entity_sections.append(current_group)
+                current_section_type = "entity"
                 continue
 
             current_group = {"vertical": section_title, "items": []}
             vertical_groups.append(current_group)
+            current_section_type = "vertical"
             continue
 
-        if current_group and line.startswith("- "):
+        if current_group and current_section_type == "vertical" and line.startswith("- "):
             parsed = parse_digest_bullet(line)
+
+            if parsed:
+                current_group["items"].append(parsed)
+
+        if current_group and current_section_type == "entity" and line.startswith("- **"):
+            parsed = parse_entity_bullet(line)
 
             if parsed:
                 current_group["items"].append(parsed)
@@ -134,6 +184,7 @@ def parse_digest(digest_path):
         "title": title,
         "generated_at": generated_at,
         "vertical_groups": vertical_groups,
+        "entity_sections": entity_sections,
     }
 
 
@@ -199,7 +250,44 @@ def build_text_payload(payload):
     if vertical_parts:
         parts.append(" | ".join(vertical_parts))
 
+    entity_parts = []
+
+    for group in payload.get("entity_section_summaries", [])[:3]:
+        entity_parts.append(f"{group['section']}: {group['summary']}")
+
+    if entity_parts:
+        parts.append(" | ".join(entity_parts))
+
     return truncate_text(" | ".join(parts), 2800)
+
+
+def summarize_entity_group(group):
+    items = group.get("items", [])
+    item_count = len(items)
+
+    if not items:
+        return {
+            "section": clean_text(group.get("section")),
+            "item_count": 0,
+            "summary": "No entity signals available.",
+        }
+
+    top_item = items[0]
+    summary = (
+        f"{top_item.get('entity', 'Unknown')} "
+        f"({top_item.get('trend', 'stable')}, "
+        f"{top_item.get('mentions', 0)} mentions, "
+        f"{top_item.get('sources', 0)} sources)"
+    )
+
+    if item_count > 1:
+        summary = f"{summary}; +{item_count - 1} more"
+
+    return {
+        "section": clean_text(group.get("section")),
+        "item_count": item_count,
+        "summary": truncate_text(summary, 180),
+    }
 
 
 def build_slack_digest_payload(
@@ -222,6 +310,10 @@ def build_slack_digest_payload(
         summarize_vertical_group(group)
         for group in digest["vertical_groups"]
     ]
+    entity_section_summaries = [
+        summarize_entity_group(group)
+        for group in digest["entity_sections"]
+    ]
 
     payload = {
         "title": clean_text(digest["title"]),
@@ -229,6 +321,7 @@ def build_slack_digest_payload(
         "top_alerts_count": count_jsonl_records(alerts_path),
         "promoted_to_hermes_count": count_jsonl_records(hermes_path),
         "grouped_vertical_summaries": grouped_vertical_summaries,
+        "entity_section_summaries": entity_section_summaries,
         "full_digest_path": str(digest_path) if digest_path.exists() else None,
     }
     payload["text"] = build_text_payload(payload)
