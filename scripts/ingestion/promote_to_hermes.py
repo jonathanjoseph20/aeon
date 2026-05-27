@@ -29,21 +29,33 @@ DEFAULT_INPUT_LOG = Path("data/processed/intake_log.jsonl")
 DEFAULT_EVENT_DIR = Path("data/events/promote_to_hermes")
 DEFAULT_HERMES_DIR = Path("data/hermes/promoted")
 DEFAULT_IMPORTANCE_THRESHOLD = 7
-DEFAULT_PROMOTION_SCORE_THRESHOLD = 7.5
-DEFAULT_MIN_SIGNAL_COUNT = 2
+DEFAULT_PROMOTION_SCORE_THRESHOLD = 15.0
+DEFAULT_PROMOTION_CONFIDENCE_THRESHOLD = 96
+DEFAULT_MIN_SIGNAL_COUNT = 3
+DEFAULT_MIN_SIGNAL_COUNT_WITH_OVERRIDE = 2
 DEFAULT_WEIGHTS = {
-    "alert_severity": 5.0,
+    "alert_severity": 6.0,
     "source_priority": {
-        "high": 4.0,
-        "medium": 2.0,
+        "high": 6.0,
+        "medium": 0.0,
         "low": 0.0,
     },
-    "watchlist": 3.5,
-    "entity_trend": 3.0,
-    "source_diversity": 2.5,
+    "watchlist": 0.5,
+    "entity_trend": 1.5,
+    "source_diversity": 5.0,
 }
-HIGH_IMPORTANCE_SIGNAL_THRESHOLD = 8
+HIGH_IMPORTANCE_SIGNAL_THRESHOLD = 9
 LOW_INFORMATION_TWEET_WORD_LIMIT = 18
+STRONG_ENTITY_SOURCE_DIVERSITY_THRESHOLD = 4
+STRONG_ENTITY_SOURCE_TYPE_DIVERSITY_THRESHOLD = 2
+GENERIC_HERMES_SUPPRESSION_PATTERNS = (
+    r"\bstablecoin(?:s)?\b",
+    r"\brwa\b",
+    r"\btokeni[sz]ation\b",
+    r"\btokenized\b",
+    r"\breal world assets?\b",
+    r"\bprivate credit\b",
+)
 GENERIC_MARKET_COMMENTARY_PATTERNS = (
     r"\bmarket wrap\b",
     r"\bmarket commentary\b",
@@ -59,6 +71,10 @@ GENERIC_MARKET_COMMENTARY_PATTERNS = (
 )
 GENERIC_MARKET_COMMENTARY_RE = re.compile(
     "|".join(f"(?:{pattern})" for pattern in GENERIC_MARKET_COMMENTARY_PATTERNS),
+    re.IGNORECASE,
+)
+GENERIC_HERMES_SUPPRESSION_RE = re.compile(
+    "|".join(f"(?:{pattern})" for pattern in GENERIC_HERMES_SUPPRESSION_PATTERNS),
     re.IGNORECASE,
 )
 
@@ -281,7 +297,7 @@ def is_low_information_tweet(item, item_text):
     if safe_text(item.get("source_type")).lower() != "twitter":
         return False
 
-    if item.get("watchlist_hits"):
+    if item.get("promotion_threshold_override") not in (None, ""):
         return False
 
     if get_importance_score(item) >= HIGH_IMPORTANCE_SIGNAL_THRESHOLD:
@@ -292,13 +308,17 @@ def is_low_information_tweet(item, item_text):
 
 
 def is_generic_market_commentary(item, item_text):
-    if item.get("watchlist_hits"):
-        return False
-
-    if get_importance_score(item) >= HIGH_IMPORTANCE_SIGNAL_THRESHOLD:
+    if item.get("promotion_threshold_override") not in (None, ""):
         return False
 
     return bool(GENERIC_MARKET_COMMENTARY_RE.search(item_text))
+
+
+def is_generic_hermes_term(item, item_text):
+    if item.get("promotion_threshold_override") not in (None, ""):
+        return False
+
+    return bool(GENERIC_HERMES_SUPPRESSION_RE.search(item_text))
 
 
 def build_entity_context(items):
@@ -399,76 +419,31 @@ def build_promotion_evidence(item, entity_contexts, weights, importance_threshol
         importance_threshold,
     )
     importance_score = get_importance_score(item)
+    signal_band = build_signal_band(item)
     source_priority = safe_text(item.get("priority") or "low").lower()
-    signal_count = 0
+    supporting_signals = []
     score = 0.0
+    confidence = 0.0
     reasons = []
     signal_details = []
     entity_evidence = []
-
-    if importance_score >= signal_threshold:
-        signal_count += 1
-        severity_component = round(
-            weights["alert_severity"] * min(importance_score / max(signal_threshold, 1), 1.5),
-            2,
-        )
-        score += severity_component
-        reasons.append(f"importance_score>={signal_threshold:g}")
-        signal_details.append(
-            {
-                "signal": "high_importance",
-                "value": importance_score,
-                "threshold": signal_threshold,
-                "weight": weights["alert_severity"],
-                "score_component": severity_component,
-            }
-        )
-
-    priority_weight = weights["source_priority"].get(source_priority, 0.0)
-    if priority_weight > 0:
-        signal_count += 1
-        score += priority_weight
-        reasons.append(f"source_priority={source_priority}")
-        signal_details.append(
-            {
-                "signal": "source_priority",
-                "value": source_priority,
-                "threshold": "high",
-                "weight": priority_weight,
-                "score_component": priority_weight,
-            }
-        )
-
-    watchlist_hits = item.get("watchlist_hits") or []
-    if watchlist_hits:
-        signal_count += 1
-        watchlist_component = weights["watchlist"]
-
-        for hit in watchlist_hits:
-            watchlist_component += safe_float(hit.get("score_boost"), 0.0)
-
-        score += watchlist_component
-        hit_names = ", ".join(
-            normalize_whitespace(hit.get("entity"))
-            for hit in watchlist_hits
-            if safe_text(hit.get("entity"))
-        )
-        reasons.append(
-            f"watchlist_hit{f':{hit_names}' if hit_names else ''}"
-        )
-        signal_details.append(
-            {
-                "signal": "watchlist_hit",
-                "value": [hit.get("entity") for hit in watchlist_hits],
-                "threshold": "any",
-                "weight": weights["watchlist"],
-                "score_component": round(watchlist_component, 2),
-            }
-        )
-
     best_entity = None
     best_trend_entity = None
     best_trend_score = 0.0
+    watchlist_hits = item.get("watchlist_hits") or []
+
+    def add_supporting_signal(signal_name, reason, score_component, confidence_component, detail):
+        nonlocal score, confidence
+
+        if signal_name not in supporting_signals:
+            supporting_signals.append(signal_name)
+
+        if reason:
+            reasons.append(reason)
+
+        score += score_component
+        confidence += confidence_component
+        signal_details.append(detail)
 
     for entity in entity_contexts:
         if best_entity is None:
@@ -491,14 +466,101 @@ def build_promotion_evidence(item, entity_contexts, weights, importance_threshol
             best_trend_score = entity["trend_score"]
             best_trend_entity = entity
 
-    if best_entity and best_entity["source_diversity"] >= 2:
-        signal_count += 1
-        source_diversity_component = weights["source_diversity"]
-        score += source_diversity_component
-        reasons.append(
-            f"cross_source_entity={best_entity['entity_name']}:{best_entity['source_diversity']} sources"
+    has_high_priority_source = source_priority == "high"
+    has_override = item.get("promotion_threshold_override") not in (None, "")
+    has_portfolio_vertical = "Portfolio" in normalize_list(item.get("verticals"))
+    has_high_signal = signal_band == "High Signal" and importance_score >= HIGH_IMPORTANCE_SIGNAL_THRESHOLD
+    has_source_context = (
+        has_override
+        or has_portfolio_vertical
+        or (best_entity is not None and best_entity["source_diversity"] >= 2)
+    )
+
+    if has_high_signal and has_high_priority_source and has_source_context:
+        severity_component = round(weights["alert_severity"], 2)
+        add_supporting_signal(
+            "high_importance",
+            f"importance_score>={signal_threshold:g}",
+            severity_component,
+            20,
+            {
+                "signal": "high_importance",
+                "value": importance_score,
+                "threshold": signal_threshold,
+                "weight": weights["alert_severity"],
+                "score_component": severity_component,
+            },
         )
-        signal_details.append(
+
+    if has_high_signal and has_high_priority_source and has_source_context:
+        add_supporting_signal(
+            "high_signal_band",
+            "signal_band=High Signal",
+            3.0,
+            15,
+            {
+                "signal": "high_signal_band",
+                "value": signal_band,
+                "threshold": "High Signal",
+                "weight": 3.0,
+                "score_component": 3.0,
+            },
+        )
+
+    priority_weight = weights["source_priority"].get(source_priority, 0.0)
+    if has_high_priority_source and priority_weight > 0 and has_source_context:
+        add_supporting_signal(
+            "high_priority_source",
+            f"source_priority={source_priority}",
+            priority_weight,
+            20,
+            {
+                "signal": "source_priority",
+                "value": source_priority,
+                "threshold": "high",
+                "weight": priority_weight,
+                "score_component": priority_weight,
+            },
+        )
+
+    if has_override and has_source_context:
+        override_component = 5.0
+        add_supporting_signal(
+            "explicit_high_priority_override",
+            f"explicit_override={item.get('promotion_threshold_override')}",
+            override_component,
+            25,
+            {
+                "signal": "explicit_high_priority_override",
+                "value": safe_float(item.get("promotion_threshold_override"), signal_threshold),
+                "threshold": "present",
+                "weight": override_component,
+                "score_component": override_component,
+            },
+        )
+
+    if has_portfolio_vertical and has_high_priority_source and has_source_context:
+        portfolio_component = 2.5
+        add_supporting_signal(
+            "portfolio_critical",
+            "verticals include Portfolio",
+            portfolio_component,
+            12,
+            {
+                "signal": "portfolio_critical",
+                "value": "Portfolio",
+                "threshold": "Portfolio",
+                "weight": portfolio_component,
+                "score_component": portfolio_component,
+            },
+        )
+
+    if best_entity and best_entity["source_diversity"] >= STRONG_ENTITY_SOURCE_DIVERSITY_THRESHOLD:
+        add_supporting_signal(
+            "cross_source_entity_reinforcement",
+            f"cross_source_entity={best_entity['entity_name']}:{best_entity['source_diversity']} sources",
+            weights["source_diversity"],
+            25,
             {
                 "signal": "cross_source_entity_reinforcement",
                 "value": {
@@ -506,37 +568,44 @@ def build_promotion_evidence(item, entity_contexts, weights, importance_threshol
                     "source_diversity": best_entity["source_diversity"],
                     "source_type_diversity": best_entity["source_type_diversity"],
                 },
-                "threshold": 2,
+                "threshold": STRONG_ENTITY_SOURCE_DIVERSITY_THRESHOLD,
                 "weight": weights["source_diversity"],
-                "score_component": source_diversity_component,
-            }
+                "score_component": weights["source_diversity"],
+            },
         )
         entity_evidence.append(best_entity)
 
-    if best_entity and best_entity["source_type_diversity"] >= 2:
-        signal_count += 1
-        source_type_component = round(weights["source_diversity"] * 0.85, 2)
-        score += source_type_component
-        reasons.append(
-            f"source_diversity={best_entity['source_type_diversity']} source types"
-        )
-        signal_details.append(
+    if (
+        best_entity
+        and best_entity["source_diversity"] >= STRONG_ENTITY_SOURCE_DIVERSITY_THRESHOLD
+        and best_entity["source_type_diversity"] >= STRONG_ENTITY_SOURCE_TYPE_DIVERSITY_THRESHOLD
+    ):
+        source_type_component = round(weights["source_diversity"] * 0.75, 2)
+        add_supporting_signal(
+            "source_diversity",
+            f"source_diversity={best_entity['source_type_diversity']} source types",
+            source_type_component,
+            15,
             {
                 "signal": "source_diversity",
                 "value": best_entity["source_type_diversity"],
-                "threshold": 2,
-                "weight": round(weights["source_diversity"] * 0.85, 2),
+                "threshold": STRONG_ENTITY_SOURCE_TYPE_DIVERSITY_THRESHOLD,
+                "weight": source_type_component,
                 "score_component": source_type_component,
-            }
+            },
         )
 
-    if best_trend_entity and best_trend_score > 0:
+    if (
+        best_trend_entity
+        and best_trend_score > 0
+        and ("cross_source_entity_reinforcement" in supporting_signals or "source_diversity" in supporting_signals)
+    ):
         trend_component = round(weights["entity_trend"] * max(best_trend_score, 0.0), 2)
-        score += trend_component
-        reasons.append(
-            f"entity_trend={best_trend_entity['entity_name']}:{best_trend_score:+.3f}"
-        )
-        signal_details.append(
+        add_supporting_signal(
+            "entity_trend",
+            f"entity_trend={best_trend_entity['entity_name']}:{best_trend_score:+.3f}",
+            trend_component,
+            10,
             {
                 "signal": "entity_trend",
                 "value": {
@@ -547,27 +616,59 @@ def build_promotion_evidence(item, entity_contexts, weights, importance_threshol
                 "threshold": ">0",
                 "weight": weights["entity_trend"],
                 "score_component": trend_component,
+            },
+        )
+
+    if watchlist_hits and len(supporting_signals) >= 2:
+        watchlist_component = weights["watchlist"]
+
+        for hit in watchlist_hits:
+            watchlist_component += safe_float(hit.get("score_boost"), 0.0) * 0.1
+
+        score += watchlist_component
+        confidence += 3
+        hit_names = ", ".join(
+            normalize_whitespace(hit.get("entity"))
+            for hit in watchlist_hits
+            if safe_text(hit.get("entity"))
+        )
+        reasons.append(f"watchlist_hit{f':{hit_names}' if hit_names else ''}")
+        signal_details.append(
+            {
+                "signal": "watchlist_hit",
+                "value": [hit.get("entity") for hit in watchlist_hits],
+                "threshold": "any",
+                "weight": weights["watchlist"],
+                "score_component": round(watchlist_component, 2),
             }
         )
 
     promotion_score = round(score, 2)
-    promotion_confidence = max(
-        0,
-        min(
-            100,
+    promotion_confidence = min(
+        100,
+        max(
+            0,
             int(
                 round(
-                    (promotion_score / max(DEFAULT_PROMOTION_SCORE_THRESHOLD, 1)) * 55
-                    + signal_count * 8
-                    + (5 if watchlist_hits else 0)
+                    promotion_score * 3
+                    + len(supporting_signals) * 18
+                    + (8 if has_portfolio_vertical else 0)
+                    + (10 if best_entity and best_entity["source_diversity"] >= STRONG_ENTITY_SOURCE_DIVERSITY_THRESHOLD else 0)
+                    + (3 if watchlist_hits else 0)
                 )
             ),
         ),
     )
 
     reason_fields = {
-        "signal_count": signal_count,
+        "signal_count": len(supporting_signals),
+        "supporting_signals": supporting_signals,
         "promotion_score": promotion_score,
+        "promotion_confidence": promotion_confidence,
+        "signal_band": signal_band,
+        "high_priority_source": has_high_priority_source,
+        "portfolio_critical": has_portfolio_vertical,
+        "explicit_override": has_override,
         "promotion_threshold": signal_threshold,
         "minimum_signal_count": DEFAULT_MIN_SIGNAL_COUNT,
         "signal_details": signal_details,
@@ -578,7 +679,15 @@ def build_promotion_evidence(item, entity_contexts, weights, importance_threshol
     return {
         "promotion_score": promotion_score,
         "promotion_confidence": promotion_confidence,
-        "signal_count": signal_count,
+        "signal_count": len(supporting_signals),
+        "supporting_signals": supporting_signals,
+        "has_high_priority_source": has_high_priority_source,
+        "has_explicit_override": "explicit_high_priority_override" in supporting_signals,
+        "has_strong_entity_reinforcement": "cross_source_entity_reinforcement" in supporting_signals,
+        "has_source_diversity": "source_diversity" in supporting_signals,
+        "has_high_signal_band": "high_signal_band" in supporting_signals,
+        "has_portfolio_critical": "portfolio_critical" in supporting_signals,
+        "signal_band": signal_band,
         "promotion_reasons": reasons,
         "promotion_reason_fields": reason_fields,
         "best_entity": best_entity,
@@ -731,6 +840,7 @@ def promote_items(
     run_date=None,
     importance_threshold=DEFAULT_IMPORTANCE_THRESHOLD,
     promotion_score_threshold=DEFAULT_PROMOTION_SCORE_THRESHOLD,
+    promotion_confidence_threshold=DEFAULT_PROMOTION_CONFIDENCE_THRESHOLD,
     min_signal_count=DEFAULT_MIN_SIGNAL_COUNT,
     weights=None,
     dry_run=False,
@@ -756,6 +866,7 @@ def promote_items(
             "suppressed_count": 0,
             "metrics": {
                 "promotion_score_threshold": promotion_score_threshold,
+                "promotion_confidence_threshold": promotion_confidence_threshold,
                 "min_signal_count": min_signal_count,
             },
         }
@@ -781,6 +892,8 @@ def promote_items(
             suppression_reason = "low_information_tweet"
         elif is_generic_market_commentary(item, item_text):
             suppression_reason = "generic_market_commentary"
+        elif is_generic_hermes_term(item, item_text):
+            suppression_reason = "generic_hermes_term"
 
         if suppression_reason:
             suppressed_count += 1
@@ -793,9 +906,32 @@ def promote_items(
             weights,
             importance_threshold,
         )
+        signal_band = evidence["signal_band"]
+
+        required_signals = (
+            min_signal_count
+            if not evidence["has_explicit_override"]
+            else min(DEFAULT_MIN_SIGNAL_COUNT_WITH_OVERRIDE, min_signal_count)
+        )
+
+        if signal_band == "Normal Digest":
+            if not (
+                evidence["has_explicit_override"]
+                or (
+                    evidence["has_high_priority_source"]
+                    and evidence["has_high_signal_band"]
+                    and evidence["has_strong_entity_reinforcement"]
+                )
+            ):
+                suppressed_count += 1
+                continue
+
+        if evidence["signal_count"] < required_signals:
+            suppressed_count += 1
+            continue
 
         if (
-            evidence["signal_count"] < min_signal_count
+            evidence["promotion_confidence"] < promotion_confidence_threshold
             or evidence["promotion_score"] < get_effective_threshold(item, promotion_score_threshold)
         ):
             suppressed_count += 1
@@ -820,11 +956,13 @@ def promote_items(
             item,
             promotion_score_threshold,
         )
+        built["event_record"]["promotion_reason_fields"]["promotion_confidence_threshold"] = promotion_confidence_threshold
         built["event_record"]["promotion_reason_fields"]["minimum_signal_count"] = min_signal_count
         built["hermes_record"]["promotion_reason_fields"]["promotion_threshold"] = get_effective_threshold(
             item,
             promotion_score_threshold,
         )
+        built["hermes_record"]["promotion_reason_fields"]["promotion_confidence_threshold"] = promotion_confidence_threshold
         built["hermes_record"]["promotion_reason_fields"]["minimum_signal_count"] = min_signal_count
 
         planned.append(built)
@@ -855,6 +993,7 @@ def promote_items(
         "suppressed_count": suppressed_count,
         "metrics": {
             "promotion_score_threshold": promotion_score_threshold,
+            "promotion_confidence_threshold": promotion_confidence_threshold,
             "min_signal_count": min_signal_count,
         },
     }
@@ -897,6 +1036,12 @@ def main():
         help="Minimum weighted score required for Hermes promotion.",
     )
     parser.add_argument(
+        "--promotion-confidence-threshold",
+        default=DEFAULT_PROMOTION_CONFIDENCE_THRESHOLD,
+        type=int,
+        help="Minimum promotion confidence required for Hermes promotion.",
+    )
+    parser.add_argument(
         "--min-signal-count",
         default=DEFAULT_MIN_SIGNAL_COUNT,
         type=int,
@@ -922,6 +1067,7 @@ def main():
         run_date=args.date or None,
         importance_threshold=args.importance_threshold,
         promotion_score_threshold=args.promotion_score_threshold,
+        promotion_confidence_threshold=args.promotion_confidence_threshold,
         min_signal_count=args.min_signal_count,
         dry_run=args.dry_run,
         include_slack_payloads=args.include_slack_payloads,
