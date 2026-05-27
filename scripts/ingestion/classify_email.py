@@ -8,9 +8,13 @@ from pathlib import Path
 
 import yaml
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[1]
 
-from source_config import (
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.source_config import (
     find_source_entry,
     is_enabled,
     load_source_entries,
@@ -20,7 +24,7 @@ from source_config import (
     normalize_twitter_handle,
     priority_score_boost,
 )
-from utils.clean_text import clean_email_text
+from scripts.utils.clean_text import clean_email_text
 
 
 IGNORE_SUBJECT_PATTERNS = [

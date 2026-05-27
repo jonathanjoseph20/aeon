@@ -1,7 +1,9 @@
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +25,43 @@ run_local_pipeline = load_run_local_pipeline_module()
 
 
 class RunLocalPipelineTests(unittest.TestCase):
+    def test_build_subprocess_env_prepends_repo_root_to_pythonpath(self):
+        with mock.patch.dict(os.environ, {"PYTHONPATH": "/opt/custom"}, clear=False):
+            env = run_local_pipeline.build_subprocess_env()
+
+        self.assertEqual(
+            env["PYTHONPATH"],
+            os.pathsep.join([str(REPO_ROOT), "/opt/custom"]),
+        )
+
+    def test_run_pipeline_passes_repo_root_pythonpath_to_subprocesses(self):
+        calls = []
+
+        class DummyResult:
+            returncode = 0
+
+        def fake_run(command, cwd=None, env=None):
+            calls.append({"command": command, "cwd": cwd, "env": env})
+            return DummyResult()
+
+        with mock.patch.dict(os.environ, {"PYTHONPATH": "/opt/custom"}, clear=False):
+            with mock.patch.object(run_local_pipeline.subprocess, "run", side_effect=fake_run):
+                run_local_pipeline.run_pipeline(
+                    [
+                        {
+                            "label": "Test step",
+                            "command": ["/usr/bin/python3", "-c", "print('ok')"],
+                        }
+                    ]
+                )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["cwd"], REPO_ROOT)
+        self.assertEqual(
+            calls[0]["env"]["PYTHONPATH"],
+            os.pathsep.join([str(REPO_ROOT), "/opt/custom"]),
+        )
+
     def test_build_pipeline_steps_prefers_configured_inputs_in_order(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)

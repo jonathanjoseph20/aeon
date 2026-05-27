@@ -8,13 +8,10 @@ import sys
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
 
-for path in (REPO_ROOT, SCRIPT_DIR):
-    path_str = str(path)
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-    if path_str not in sys.path:
-        sys.path.append(path_str)
-
-from build_entity_summary import build_entity_summary
+from scripts.ingestion.build_entity_summary import build_entity_summary
 
 
 LOG_PATH = Path("data/processed/intake_log.jsonl")

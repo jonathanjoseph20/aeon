@@ -8,13 +8,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
 
-for path in (REPO_ROOT, SCRIPT_DIR):
-    path_str = str(path)
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-    if path_str not in sys.path:
-        sys.path.append(path_str)
-
-from source_config import is_enabled  # noqa: E402
+from scripts.source_config import is_enabled  # noqa: E402
 
 
 log_path = Path("data/processed/intake_log.jsonl")

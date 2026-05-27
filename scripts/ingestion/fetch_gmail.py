@@ -6,13 +6,17 @@ import base64
 import re
 from email.utils import parseaddr
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[1]
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from utils.clean_text import clean_email_text
+from scripts.utils.clean_text import clean_email_text
 from bs4 import BeautifulSoup
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
@@ -23,6 +27,11 @@ credentials_path = "credentials/gmail_credentials.json"
 Path("credentials").mkdir(parents=True, exist_ok=True)
 
 creds = None
+
+
+def skip_gmail(reason):
+    print(f"Skipping Gmail intake: {reason}")
+    raise SystemExit(0)
 
 
 def infer_source_from_sender(sender):
@@ -44,177 +53,172 @@ def infer_source_from_sender(sender):
 
 
 if os.path.exists(token_path):
+    try:
+        creds = Credentials.from_authorized_user_file(
+            token_path,
+            SCOPES
+        )
 
-    creds = Credentials.from_authorized_user_file(
-        token_path,
-        SCOPES
-    )
-
-if creds and creds.expired and creds.refresh_token:
-
-    creds.refresh(Request())
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+    except Exception as exc:
+        skip_gmail(f"unable to refresh cached credentials ({exc})")
 
 if not creds or not creds.valid:
+    skip_gmail("no valid cached OAuth credentials were found")
 
-    flow = InstalledAppFlow.from_client_secrets_file(
-        credentials_path,
-        SCOPES
-    )
+try:
+    service = build("gmail", "v1", credentials=creds)
 
-    creds = flow.run_local_server(port=0)
+    with open("data/metadata/email_sources.json", "r") as f:
+        source_registry = json.load(f)
 
-    with open(token_path, "w") as token:
-        token.write(creds.to_json())
+    with open("config/gmail_labels.json", "r") as f:
+        gmail_labels = json.load(f)
 
-service = build("gmail", "v1", credentials=creds)
+    messages = []
 
-with open("data/metadata/email_sources.json", "r") as f:
-    source_registry = json.load(f)
+    for label_name, label_id in gmail_labels.items():
 
-with open("config/gmail_labels.json", "r") as f:
-    gmail_labels = json.load(f)
+        results = service.users().messages().list(
+            userId="me",
+            labelIds=[label_id],
+            maxResults=5
+        ).execute()
 
-messages = []
+        label_messages = results.get("messages", [])
 
-for label_name, label_id in gmail_labels.items():
+        print(f"{label_name}: {len(label_messages)} emails found")
 
-    results = service.users().messages().list(
-        userId="me",
-        labelIds=[label_id],
-        maxResults=5
-    ).execute()
+        for m in label_messages:
+            m["aeon_gmail_label"] = label_name
+            messages.append(m)
 
-    label_messages = results.get("messages", [])
+    print(f"\nFound {len(messages)} emails\n")
 
-    print(f"{label_name}: {len(label_messages)} emails found")
+    output_dir = Path("data/intake/email")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    for m in label_messages:
-        m["aeon_gmail_label"] = label_name
-        messages.append(m)
+    candidate_dir = Path("data/metadata")
+    candidate_dir.mkdir(parents=True, exist_ok=True)
 
-print(f"\nFound {len(messages)} emails\n")
+    candidate_path = candidate_dir / "source_candidates.jsonl"
 
-output_dir = Path("data/intake/email")
-output_dir.mkdir(parents=True, exist_ok=True)
+    for msg in messages:
 
-candidate_dir = Path("data/metadata")
-candidate_dir.mkdir(parents=True, exist_ok=True)
+        msg_id = msg["id"]
 
-candidate_path = candidate_dir / "source_candidates.jsonl"
+        message = service.users().messages().get(
+            userId="me",
+            id=msg_id,
+            format="full"
+        ).execute()
 
-for msg in messages:
+        headers = message["payload"].get("headers", [])
 
-    msg_id = msg["id"]
+        subject = ""
+        sender = ""
 
-    message = service.users().messages().get(
-        userId="me",
-        id=msg_id,
-        format="full"
-    ).execute()
+        for header in headers:
 
-    headers = message["payload"].get("headers", [])
+            if header["name"] == "Subject":
+                subject = header["value"]
 
-    subject = ""
-    sender = ""
+            elif header["name"] == "From":
+                sender = header["value"]
 
-    for header in headers:
+        gmail_label = msg.get("aeon_gmail_label", "")
 
-        if header["name"] == "Subject":
-            subject = header["value"]
+        domain, suggested_name = infer_source_from_sender(sender)
 
-        elif header["name"] == "From":
-            sender = header["value"]
+        source_name = suggested_name or "Unknown"
+        priority = "low"
+        importance_score = 1
+        default_verticals = []
+        known_source = False
 
-    gmail_label = msg.get("aeon_gmail_label", "")
+        for registered_domain, metadata in source_registry.items():
 
-    domain, suggested_name = infer_source_from_sender(sender)
+            if registered_domain.lower() in sender.lower():
 
-    source_name = suggested_name or "Unknown"
-    priority = "low"
-    importance_score = 1
-    default_verticals = []
-    known_source = False
+                source_name = metadata["name"]
+                priority = metadata["priority"]
+                importance_score = metadata["importance_score"]
+                default_verticals = metadata.get(
+                    "default_verticals",
+                    []
+                )
 
-    for registered_domain, metadata in source_registry.items():
+                known_source = True
 
-        if registered_domain.lower() in sender.lower():
+                break
 
-            source_name = metadata["name"]
-            priority = metadata["priority"]
-            importance_score = metadata["importance_score"]
-            default_verticals = metadata.get(
-                "default_verticals",
-                []
-            )
+        payload = message["payload"]
 
-            known_source = True
+        body_data = ""
 
-            break
+        parts = payload.get("parts", [])
 
-    payload = message["payload"]
+        for part in parts:
 
-    body_data = ""
+            mime = part.get("mimeType")
 
-    parts = payload.get("parts", [])
+            data = part.get("body", {}).get("data")
 
-    for part in parts:
+            if not data:
+                continue
 
-        mime = part.get("mimeType")
+            decoded = base64.urlsafe_b64decode(
+                data
+            ).decode("utf-8", errors="ignore")
 
-        data = part.get("body", {}).get("data")
+            if mime == "text/plain":
 
-        if not data:
+                body_data = decoded
+                break
+
+            elif mime == "text/html" and not body_data:
+
+                soup = BeautifulSoup(decoded, "html.parser")
+
+                body_data = soup.get_text(separator="\n")
+
+        body_data = clean_email_text(body_data)
+
+        if not body_data.strip():
             continue
 
-        decoded = base64.urlsafe_b64decode(
-            data
-        ).decode("utf-8", errors="ignore")
+        if not known_source and domain:
 
-        if mime == "text/plain":
+            candidate = {
+                "domain": domain,
+                "sender": sender,
+                "subject": subject,
+                "gmail_label": gmail_label,
+                "suggested_name": source_name,
+                "priority": priority,
+                "importance_score": importance_score
+            }
 
-            body_data = decoded
-            break
+            with candidate_path.open("a") as f:
+                f.write(json.dumps(candidate) + "\n")
 
-        elif mime == "text/html" and not body_data:
+        full_content = (
+            f"SOURCE: {source_name}\n"
+            f"SOURCE_DOMAIN: {domain}\n"
+            f"KNOWN_SOURCE: {known_source}\n"
+            f"SENDER: {sender}\n"
+            f"SUBJECT: {subject}\n"
+            f"PRIORITY: {priority}\n"
+            f"GMAIL_LABEL: {gmail_label}\n"
+            f"IMPORTANCE_SCORE: {importance_score}\n\n"
+            f"{body_data}\n"
+        )
 
-            soup = BeautifulSoup(decoded, "html.parser")
+        output_file = output_dir / f"gmail_{msg_id}.txt"
 
-            body_data = soup.get_text(separator="\n")
+        output_file.write_text(full_content)
 
-    body_data = clean_email_text(body_data)
-
-    if not body_data.strip():
-        continue
-
-    if not known_source and domain:
-
-        candidate = {
-            "domain": domain,
-            "sender": sender,
-            "subject": subject,
-            "gmail_label": gmail_label,
-            "suggested_name": source_name,
-            "priority": priority,
-            "importance_score": importance_score
-        }
-
-        with candidate_path.open("a") as f:
-            f.write(json.dumps(candidate) + "\n")
-
-    full_content = (
-        f"SOURCE: {source_name}\n"
-        f"SOURCE_DOMAIN: {domain}\n"
-        f"KNOWN_SOURCE: {known_source}\n"
-        f"SENDER: {sender}\n"
-        f"SUBJECT: {subject}\n"
-        f"PRIORITY: {priority}\n"
-        f"GMAIL_LABEL: {gmail_label}\n"
-        f"IMPORTANCE_SCORE: {importance_score}\n\n"
-        f"{body_data}\n"
-    )
-
-    output_file = output_dir / f"gmail_{msg_id}.txt"
-
-    output_file.write_text(full_content)
-
-    print(f"Saved: {output_file.name}")
+        print(f"Saved: {output_file.name}")
+except Exception as exc:
+    skip_gmail(f"unable to query Gmail ({exc})")

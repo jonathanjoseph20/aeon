@@ -11,13 +11,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
 
-for path in (REPO_ROOT, SCRIPT_DIR):
-    path_str = str(path)
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-    if path_str not in sys.path:
-        sys.path.append(path_str)
-
-from build_entity_summary import (  # noqa: E402
+from scripts.ingestion.build_entity_summary import (  # noqa: E402
     classify_trend,
     extract_entities,
     load_configured_entities,

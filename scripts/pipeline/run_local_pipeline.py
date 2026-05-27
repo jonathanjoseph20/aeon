@@ -1,16 +1,20 @@
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import yaml
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[1]
 
-from source_config import load_source_entries, normalize_source_type
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.source_config import load_source_entries, normalize_source_type
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 INGESTION_DIR = REPO_ROOT / "scripts" / "ingestion"
 HERMES_DIR = REPO_ROOT / "scripts" / "hermes"
 SLACK_DIR = REPO_ROOT / "scripts" / "slack"
@@ -71,6 +75,21 @@ def build_slack_command(script_name, *args):
         str(SLACK_DIR / script_name),
         *[str(arg) for arg in args],
     ]
+
+
+def build_subprocess_env():
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    pythonpath_entries = [str(REPO_ROOT)]
+
+    for entry in existing_pythonpath.split(os.pathsep):
+        entry = entry.strip()
+
+        if entry and entry not in pythonpath_entries:
+            pythonpath_entries.append(entry)
+
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
+    return env
 
 
 def build_pipeline_steps(
@@ -189,7 +208,11 @@ def run_pipeline(steps, dry_run=False):
         print(f"\nRunning: {step['label']}")
         print(f"Command: {' '.join(step['command'])}")
 
-        result = subprocess.run(step["command"], cwd=REPO_ROOT)
+        result = subprocess.run(
+            step["command"],
+            cwd=REPO_ROOT,
+            env=build_subprocess_env(),
+        )
 
         if result.returncode != 0:
             print(f"\nPipeline failed at: {step['label']}")

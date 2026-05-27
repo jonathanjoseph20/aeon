@@ -9,13 +9,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
 
-for path in (REPO_ROOT, SCRIPT_DIR):
-    path_str = str(path)
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-    if path_str not in sys.path:
-        sys.path.append(path_str)
-
-from build_narrative_summary import build_narrative_summary
+from scripts.ingestion.build_narrative_summary import build_narrative_summary
 
 
 DEFAULT_DIGEST_PATH = Path("data/processed/daily_digest.md")

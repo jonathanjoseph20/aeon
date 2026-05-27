@@ -9,13 +9,10 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
 
-for path in (REPO_ROOT, SCRIPT_DIR):
-    path_str = str(path)
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-    if path_str not in sys.path:
-        sys.path.append(path_str)
-
-from build_entity_summary import (  # noqa: E402
+from scripts.ingestion.build_entity_summary import (  # noqa: E402
     clean_text,
     entity_key,
     extract_entities,
@@ -669,7 +666,9 @@ def build_narrative_summary(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not entity_summary_path.exists():
-        from build_entity_summary import build_entity_summary as build_entity_summary_artifact
+        from scripts.ingestion.build_entity_summary import (
+            build_entity_summary as build_entity_summary_artifact,
+        )
 
         build_entity_summary_artifact(
             log_path=log_path,
