@@ -1,0 +1,125 @@
+# Canonical AEON source registry.
+# Fields:
+#   source_id, platform, category, verticals, priority, trust_score,
+#   noise_score, enabled, tags
+
+sources:
+  - source_id: bankless
+    platform: newsletter
+    category: defi
+    verticals: [DeFi, Macro]
+    priority: high
+    trust_score: 91
+    noise_score: 11
+    enabled: true
+    tags: [newsletter, crypto, market-structure]
+
+  - source_id: a1research__
+    platform: x
+    category: research
+    verticals: [Research, Data]
+    priority: high
+    trust_score: 93
+    noise_score: 9
+    enabled: true
+    tags: [x, research, data]
+
+  - source_id: 0xsammy
+    platform: x
+    category: research
+    verticals: [Research, AI]
+    priority: high
+    trust_score: 92
+    noise_score: 10
+    enabled: true
+    tags: [x, research, ai]
+
+  - source_id: 40acres_finance
+    platform: x
+    category: defi
+    verticals: [RWA, DeFi]
+    priority: high
+    trust_score: 88
+    noise_score: 16
+    enabled: true
+    tags: [x, rwa, defi]
+
+  - source_id: arthur0x
+    platform: x
+    category: venture
+    verticals: [VC, Crypto]
+    priority: medium
+    trust_score: 82
+    noise_score: 18
+    enabled: true
+    tags: [x, vc, crypto]
+
+  - source_id: defi_ignas
+    platform: x
+    category: defi
+    verticals: [DeFi, Research]
+    priority: medium
+    trust_score: 84
+    noise_score: 17
+    enabled: true
+    tags: [x, defi, research]
+
+  - source_id: mikelppolito_
+    platform: x
+    category: media
+    verticals: [Media, Crypto]
+    priority: medium
+    trust_score: 76
+    noise_score: 24
+    enabled: true
+    tags: [x, media, crypto]
+
+  - source_id: rektdiomedes
+    platform: x
+    category: macro
+    verticals: [Macro, Crypto, Media]
+    priority: medium
+    trust_score: 78
+    noise_score: 22
+    enabled: true
+    tags: [x, macro, crypto]
+
+  - source_id: redphone
+    platform: x
+    category: media
+    verticals: [VC, Marketing, Crypto]
+    priority: medium
+    trust_score: 72
+    noise_score: 28
+    enabled: true
+    tags: [x, media, marketing]
+
+  - source_id: thedailygwei
+    platform: x
+    category: education
+    verticals: [Ethereum, Education, Media]
+    priority: medium
+    trust_score: 80
+    noise_score: 20
+    enabled: true
+    tags: [x, ethereum, education]
+
+  - source_id: peter_attia
+    platform: newsletter
+    category: health
+    verticals: [Personal, Health]
+    priority: low
+    trust_score: 94
+    noise_score: 8
+    enabled: true
+    tags: [newsletter, longevity, health]
+
+  - source_id: elonmusk
+    platform: x
+    category: macro
+    verticals: [Tech, Macro, AI]
+    priority: low
+    trust_score: 62
+    noise_score: 44
+    enabled: true
+    tags: [x, tech, macro]
